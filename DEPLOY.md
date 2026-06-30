@@ -1,0 +1,161 @@
+# Cloud Server And Mobile Build Guide
+
+This guide covers two deliverables:
+
+- Cloud server install: FastAPI backend, MongoDB, and Expo web static build.
+- Mobile install files: Android APK/AAB and iOS/iPadOS IPA through EAS Build.
+
+## 1. Cloud Server Build
+
+Use a Linux VPS with Docker and Docker Compose installed.
+
+### 1.1. Configure Server Environment
+
+```bash
+cd deployment
+cp .env.example .env
+```
+
+Edit `deployment/.env`:
+
+```bash
+MONGO_URL=mongodb://mongo:27017
+DB_NAME=goigem
+JWT_SECRET=<long-random-secret>
+ADMIN_EMAIL=admin@shift.com
+ADMIN_PASSWORD=<strong-admin-password>
+```
+
+Generate a secret:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+### 1.2. Build Frontend Web For Your Domain
+
+The frontend compiles `EXPO_PUBLIC_BACKEND_URL` into the app. For the included Nginx same-origin deployment, build without loading a local `.env` so browser requests go to `/api` on the same domain:
+
+```bash
+cd frontend
+yarn install --frozen-lockfile
+EXPO_NO_DOTENV=1 EXPO_PUBLIC_BACKEND_URL= npx expo export --platform web
+```
+
+If the backend is hosted on another origin, set that public HTTPS origin before exporting:
+
+```bash
+EXPO_PUBLIC_BACKEND_URL=https://shift.example.com npx expo export --platform web
+```
+
+The static site is written to `frontend/dist`.
+
+### 1.3. Start Server Stack
+
+```bash
+cd deployment
+docker compose up -d --build
+```
+
+Check health:
+
+```bash
+docker compose ps
+curl http://127.0.0.1/api/
+```
+
+Expected response:
+
+```json
+{"message":"Shift Management API"}
+```
+
+### 1.4. Add HTTPS
+
+For production, put Cloudflare, Caddy, Traefik, or an Nginx reverse proxy with Let's Encrypt in front of this stack.
+
+The included compose file publishes HTTP on port `80`. HTTPS termination can be done outside this compose stack, or by replacing `deployment/nginx.conf` with your TLS configuration.
+
+## 2. Mobile Builds
+
+This repo uses Expo managed workflow. The practical production build path is EAS Build.
+
+### 2.1. Install EAS CLI
+
+```bash
+cd frontend
+npm install -g eas-cli
+eas login
+```
+
+### 2.2. Update Backend URL
+
+Edit `frontend/eas.json` and replace:
+
+```json
+"EXPO_PUBLIC_BACKEND_URL": "https://your-domain.example"
+```
+
+with your actual HTTPS backend origin.
+
+### 2.3. Build APK For Direct Install
+
+```bash
+cd frontend
+eas build --platform android --profile preview-apk
+```
+
+EAS returns a download URL for an `.apk` file. Use this for direct Android installation/testing.
+
+### 2.4. Build AAB For Play Store
+
+```bash
+cd frontend
+eas build --platform android --profile production-aab
+```
+
+EAS returns an `.aab` file for Google Play Console upload.
+
+### 2.5. Build IPA For iOS / iPadOS Internal Install
+
+This requires an Apple Developer account. For installable `.ipa` testing outside the App Store, use the internal profile:
+
+```bash
+cd frontend
+eas build --platform ios --profile ios-ipa
+```
+
+EAS will ask for Apple credentials and provisioning setup if they are not already configured. The resulting `.ipa` can be installed only on provisioned devices for internal/ad-hoc distribution.
+
+### 2.6. Build iOS / iPadOS For App Store
+
+```bash
+cd frontend
+eas build --platform ios --profile ios-production
+```
+
+This produces an App Store distribution build. Submit it with:
+
+```bash
+eas submit --platform ios
+```
+
+## 3. Release Checklist
+
+Before publishing a build:
+
+```bash
+python3 -m compileall -q backend backend_test.py tests
+cd frontend
+yarn install --frozen-lockfile
+npx tsc --noEmit
+npm run lint
+```
+
+Then:
+
+```bash
+EXPO_NO_DOTENV=1 EXPO_PUBLIC_BACKEND_URL= npx expo export --platform web
+cd ../deployment
+docker compose up -d --build
+```

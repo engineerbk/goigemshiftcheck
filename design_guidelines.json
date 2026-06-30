@@ -1,0 +1,145 @@
+{
+  "theme": "light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "color_palette": {
+    "primary": "#0052FF",
+    "primary_active": "#003DD9",
+    "primary_foreground": "#FFFFFF",
+    "secondary": "#F1F5F9",
+    "secondary_foreground": "#0F172A",
+    "background": "#FFFFFF",
+    "surface": "#F8FAFC",
+    "border": "#E2E8F0",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "error": "#EF4444",
+    "text_main": "#0F172A",
+    "text_muted": "#64748B"
+  },
+  "typography": {
+    "font_family_headings": "Outfit",
+    "font_family_body": "Inter",
+    "sizes": {
+      "h1": "text-3xl font-bold tracking-tight",
+      "h2": "text-2xl font-semibold tracking-tight",
+      "h3": "text-xl font-semibold",
+      "body": "text-base",
+      "small": "text-sm text-slate-500",
+      "tiny": "text-xs font-medium uppercase tracking-wider text-slate-500"
+    }
+  },
+  "spacing_and_layout": {
+    "container_padding": "p-4 sm:p-6",
+    "card_padding": "p-4",
+    "section_gap": "gap-6",
+    "item_gap": "gap-3",
+    "border_radius": {
+      "button": "rounded-full",
+      "card": "rounded-2xl",
+      "input": "rounded-xl"
+    }
+  },
+  "components": {
+    "button": {
+      "primary": "bg-[#0052FF] text-white rounded-full py-4 px-6 font-semibold flex flex-row items-center justify-center",
+      "secondary": "bg-slate-100 text-slate-900 rounded-full py-4 px-6 font-semibold flex flex-row items-center justify-center",
+      "outline": "border border-slate-200 text-slate-900 rounded-full py-4 px-6 font-semibold flex flex-row items-center justify-center bg-transparent",
+      "check_in_cta": "bg-[#0052FF] text-white rounded-full py-6 px-8 font-bold text-lg flex flex-col items-center justify-center shadow-lg shadow-blue-500/30"
+    },
+    "card": {
+      "default": "bg-white border border-slate-100 rounded-2xl p-5 shadow-sm",
+      "highlighted": "bg-blue-50 border border-blue-100 rounded-2xl p-5"
+    },
+    "input": {
+      "default": "bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-base text-slate-900"
+    },
+    "bottom_tab_bar": {
+      "style": "bg-white border-t border-slate-100 flex-row justify-around items-center h-20 pb-safe",
+      "active_icon": "text-[#0052FF]",
+      "inactive_icon": "text-slate-400"
+    }
+  },
+  "screens": {
+    "login": {
+      "layout": "Full screen with background image",
+      "elements": [
+        "Logo / Brand Header",
+        "Email Input (data-testid='login-email')",
+        "Password Input (data-testid='login-password')",
+        "Login Button (data-testid='login-submit')",
+        "Background: login_background"
+      ]
+    },
+    "employee_home": {
+      "layout": "Vertical scroll view with safe area top",
+      "elements": [
+        "Header: Greeting + Avatar (placeholder_avatar_1)",
+        "Main Card: Current Status & Massive Check-In/Out Button (data-testid='check-in-btn')",
+        "Card: Upcoming Shift Details",
+        "List: Recent Activity"
+      ]
+    },
+    "shift_registration": {
+      "layout": "Form layout with sticky bottom CTA",
+      "elements": [
+        "Date Selector (data-testid='shift-date')",
+        "Start Time Picker (data-testid='shift-start')",
+        "End Time Picker (data-testid='shift-end')",
+        "Submit Request Button (data-testid='shift-submit')"
+      ]
+    },
+    "work_history": {
+      "layout": "List view",
+      "elements": [
+        "Month/Week Filter",
+        "Summary Stats: Total Hours",
+        "List of past shifts with status indicators (completed, missed)"
+      ]
+    },
+    "admin_dashboard": {
+      "layout": "Dashboard grid/list",
+      "elements": [
+        "Header: Admin tools",
+        "Stats row: Present, Absent, Late (High-contrast typography)",
+        "Live Activity Feed",
+        "Employee List with quick actions"
+      ]
+    }
+  },
+  "iconography": {
+    "library": "lucide-react-native",
+    "style": "stroke-width: 2, clean, uncluttered. Use Phosphor or Lucide."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "category": "login_background",
+        "url": "https://static.prod-images.emergentagent.com/jobs/f00fe88d-3091-46ae-8ee6-f7a9ce308c8c/images/b87222a66edcf79a41bd366b36a0525ad58fdcb62c900a900f7caf3ffde36177.png",
+        "description": "Abstract blue and white background for the login screen."
+      },
+      {
+        "category": "placeholder_avatar_1",
+        "url": "https://images.unsplash.com/photo-1752952952773-80378cefc23d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTF8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBjb3Jwb3JhdGUlMjBlbXBsb3llZSUyMHBvcnRyYWl0fGVufDB8fHx8MTc3Njk1ODYzNHww&ixlib=rb-4.1.0&q=85",
+        "description": "Male employee avatar"
+      },
+      {
+        "category": "placeholder_avatar_2",
+        "url": "https://images.unsplash.com/photo-1758518727592-706e80ebc354?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTF8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBjb3Jwb3JhdGUlMjBlbXBsb3llZSUyMHBvcnRyYWl0fGVufDB8fHx8MTc3Njk1ODYzNHww&ixlib=rb-4.1.0&q=85",
+        "description": "Female employee avatar"
+      },
+      {
+        "category": "office_background",
+        "url": "https://images.pexels.com/photos/36631700/pexels-photo-36631700.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Modern office interior for empty states or header backgrounds"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Use Tailwind classes with NativeWind for styling. The classes provided in 'components' are Tailwind syntax.",
+    "Implement the bottom tab navigator for Employee (Home, History, Profile) and Admin (Dashboard, Employees, History).",
+    "The check-in/out button on the Employee Home screen should be massive and highly visible, using the 'check_in_cta' component guidelines.",
+    "Native time pickers (@react-native-community/datetimepicker) should be used for shift registrations.",
+    "Admin dashboard needs clear, high-contrast typography for metrics (e.g., 'text-3xl font-bold text-[#0052FF]').",
+    "Ensure all interactive elements have the specified `data-testid` attributes."
+  ]
+}
