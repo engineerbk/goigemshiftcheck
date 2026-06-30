@@ -9,6 +9,8 @@ This guide covers two deliverables:
 
 Use a Linux VPS with Docker and Docker Compose installed.
 
+For AWS, use the EC2 walkthrough in [deployment/AWS_EC2.md](./deployment/AWS_EC2.md). It covers the recommended Security Group, Elastic IP, Docker setup, same-origin Expo web build, Compose startup, HTTPS options, updates, backups, and troubleshooting.
+
 ### 1.1. Configure Server Environment
 
 ```bash
