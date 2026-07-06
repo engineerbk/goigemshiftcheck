@@ -97,6 +97,14 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 
 ## 5. Build The Web Frontend
 
+Build the frontend on EC2 unless you have a specific reason to build on your PC. The Compose `web` service serves `frontend/dist` from the EC2 filesystem:
+
+```yaml
+../frontend/dist:/usr/share/nginx/html:ro
+```
+
+So `frontend/dist` must exist on EC2 before `docker compose up -d --build`.
+
 Install Node.js 22 and Yarn:
 
 ```bash
@@ -105,15 +113,21 @@ sudo apt-get install -y nodejs
 sudo corepack enable
 ```
 
+This project uses Yarn 1 and the committed `frontend/yarn.lock`. Do not run `npm install expo` inside `frontend`; Expo is already declared in `package.json`, and npm can resolve incompatible versions.
+
 Build the same-origin web app:
 
 ```bash
 cd ~/goigemshiftcheck/frontend
+rm -rf node_modules package-lock.json
+corepack enable
 yarn install --frozen-lockfile
 EXPO_NO_DOTENV=1 EXPO_PUBLIC_BACKEND_URL= npx expo export --platform web
 ```
 
 Same-origin means the browser calls `/api` on the same domain that serves the web app.
+
+If you build on your PC instead, copy the generated `frontend/dist` directory to `~/goigemshiftcheck/frontend/dist` on EC2 before starting the stack. Do not build both places for the same release; pick one source of truth.
 
 ## 6. Start The Stack
 
@@ -167,6 +181,8 @@ cd ~/goigemshiftcheck
 git pull
 
 cd frontend
+rm -rf node_modules package-lock.json
+corepack enable
 yarn install --frozen-lockfile
 EXPO_NO_DOTENV=1 EXPO_PUBLIC_BACKEND_URL= npx expo export --platform web
 

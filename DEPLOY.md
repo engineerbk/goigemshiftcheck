@@ -36,10 +36,16 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 
 ### 1.2. Build Frontend Web For Your Domain
 
+Recommended production flow: build the frontend on the same server that runs Docker Compose, for example the AWS EC2 instance. The `web` container serves files from `frontend/dist`, so that directory must exist on the server before starting the stack.
+
+This repo uses Yarn 1 and the committed `frontend/yarn.lock`. Do not run `npm install expo` or mix npm with Yarn inside `frontend`; that can downgrade Expo packages and create dependency conflicts such as `react-native-screens`.
+
 The frontend compiles `EXPO_PUBLIC_BACKEND_URL` into the app. For the included Nginx same-origin deployment, build without loading a local `.env` so browser requests go to `/api` on the same domain:
 
 ```bash
 cd frontend
+rm -rf node_modules package-lock.json
+corepack enable
 yarn install --frozen-lockfile
 EXPO_NO_DOTENV=1 EXPO_PUBLIC_BACKEND_URL= npx expo export --platform web
 ```
@@ -51,6 +57,8 @@ EXPO_PUBLIC_BACKEND_URL=https://shift.example.com npx expo export --platform web
 ```
 
 The static site is written to `frontend/dist`.
+
+If you build on your PC instead, upload the generated `frontend/dist` directory to the EC2 server at the same repo path before running Docker Compose. Building directly on EC2 is simpler because it avoids copying build artifacts after every release.
 
 ### 1.3. Start Server Stack
 
@@ -149,9 +157,11 @@ Before publishing a build:
 ```bash
 python3 -m compileall -q backend backend_test.py tests
 cd frontend
+rm -rf node_modules package-lock.json
+corepack enable
 yarn install --frozen-lockfile
 npx tsc --noEmit
-npm run lint
+yarn lint
 ```
 
 Then:
