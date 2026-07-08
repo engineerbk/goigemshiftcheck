@@ -137,7 +137,28 @@ eas build --platform ios --profile ios-ipa
 
 EAS will ask for Apple credentials and provisioning setup if they are not already configured. The resulting `.ipa` can be installed only on provisioned devices for internal/ad-hoc distribution.
 
-### 2.6. Build iOS / iPadOS For App Store
+### 2.6. Build iOS Simulator App Without Apple Developer Account
+
+You cannot create an installable iPhone/iPad `.ipa` without Apple signing credentials. If you do not have an Apple Developer account, build for the iOS Simulator instead:
+
+```bash
+cd frontend
+yarn install --frozen-lockfile
+eas build --local --platform ios --profile ios-simulator
+```
+
+This requires macOS with Xcode installed. The output is for the iOS Simulator only, not for installation on a physical iPhone/iPad.
+
+For quick device testing without an `.ipa`, use Expo Go:
+
+```bash
+cd frontend
+yarn start --tunnel
+```
+
+Then scan the QR code with Expo Go on the iPhone.
+
+### 2.7. Build iOS / iPadOS For App Store
 
 ```bash
 cd frontend
