@@ -51,10 +51,11 @@ export default function Admin() {
   const updateRole = async (target: any, role: 'employee' | 'manager' | 'owner', storeLocation = '') => {
     const store = role === 'manager' ? storeLocation : '';
     try {
-      await api.adminUpdateUserRole(target.id, role, store);
+      const updated = await api.adminUpdateUserRole(target.id, role, store);
+      setEmployees((rows) => rows.map((row) => row.id === target.id ? updated : row));
       await load();
       if (target.id === user?.id) await refresh();
-      Alert.alert(t('saved'));
+      Alert.alert(t('saved'), `${updated.email}\n${t('role')}: ${updated.role}${updated.store_location ? `\n${t('store_location')}: ${updated.store_location}` : ''}`);
     } catch (e: any) {
       Alert.alert(t('failed'), e.message);
     }
