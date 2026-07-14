@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -30,33 +30,45 @@ export default function AdminShiftApprovals() {
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const onApprove = (s: any) => {
+    const message = `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`;
+    const approve = async () => {
+      setBusyId(s.id);
+      try { await api.adminApproveShift(s.id); await load(); }
+      catch (e: any) { Alert.alert(t('failed'), e.message); }
+      setBusyId(null);
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${t('approve_shift_confirm')}\n\n${message}`)) approve();
+      return;
+    }
     Alert.alert(
       t('approve_shift_confirm'),
-      `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`,
+      message,
       [
         { text: t('cancel'), style: 'cancel' },
-        { text: t('approve'), onPress: async () => {
-          setBusyId(s.id);
-          try { await api.adminApproveShift(s.id); await load(); }
-          catch (e: any) { Alert.alert(t('failed'), e.message); }
-          setBusyId(null);
-        } },
+        { text: t('approve'), onPress: approve },
       ]
     );
   };
 
   const onDeny = (s: any) => {
+    const message = `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`;
+    const deny = async () => {
+      setBusyId(s.id);
+      try { await api.adminRejectShift(s.id, ''); await load(); }
+      catch (e: any) { Alert.alert(t('failed'), e.message); }
+      setBusyId(null);
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${t('deny_shift_confirm')}\n\n${message}`)) deny();
+      return;
+    }
     Alert.alert(
       t('deny_shift_confirm'),
-      `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`,
+      message,
       [
         { text: t('cancel'), style: 'cancel' },
-        { text: t('deny'), style: 'destructive', onPress: async () => {
-          setBusyId(s.id);
-          try { await api.adminRejectShift(s.id, ''); await load(); }
-          catch (e: any) { Alert.alert(t('failed'), e.message); }
-          setBusyId(null);
-        } },
+        { text: t('deny'), style: 'destructive', onPress: deny },
       ]
     );
   };

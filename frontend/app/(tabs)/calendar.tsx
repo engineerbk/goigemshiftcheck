@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -93,6 +93,17 @@ export default function Calendar() {
 
   const isAdmin = user?.role === 'admin';
 
+  const confirmAction = (title: string, message: string, confirmText: string, run: () => Promise<void> | void, destructive = false) => {
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title}\n\n${message}`)) run();
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: t('cancel'), style: 'cancel' },
+      { text: confirmText, style: destructive ? 'destructive' : 'default', onPress: run },
+    ]);
+  };
+
   const moveWeek = (delta: number) => {
     const d = new Date(weekStart);
     d.setDate(d.getDate() + delta * 7);
@@ -113,26 +124,31 @@ export default function Calendar() {
       options.push({
         text: t('approve'),
         onPress: () => {
-          Alert.alert(t('approve_shift_confirm'), `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`, [
-            { text: t('cancel'), style: 'cancel' },
-            { text: t('approve'), onPress: async () => {
+          confirmAction(
+            t('approve_shift_confirm'),
+            `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`,
+            t('approve'),
+            async () => {
               try { await api.adminApproveShift(s.id); load(); }
               catch (e: any) { Alert.alert(t('failed'), e.message); }
-            } },
-          ]);
+            },
+          );
         },
       });
       options.push({
         text: t('deny'),
         style: 'destructive',
         onPress: () => {
-          Alert.alert(t('deny_shift_confirm'), `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`, [
-            { text: t('cancel'), style: 'cancel' },
-            { text: t('deny'), style: 'destructive', onPress: async () => {
+          confirmAction(
+            t('deny_shift_confirm'),
+            `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`,
+            t('deny'),
+            async () => {
               try { await api.adminRejectShift(s.id, ''); load(); }
               catch (e: any) { Alert.alert(t('failed'), e.message); }
-            } },
-          ]);
+            },
+            true,
+          );
         },
       });
     }
@@ -140,13 +156,15 @@ export default function Calendar() {
       options.push({
         text: t('revert_approval'),
         onPress: () => {
-          Alert.alert(t('revert_approval_confirm'), `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`, [
-            { text: t('cancel'), style: 'cancel' },
-            { text: t('revert_approval'), onPress: async () => {
+          confirmAction(
+            t('revert_approval_confirm'),
+            `${s.user_name || s.user_email}\n${s.date} ${s.start_time}–${s.end_time}`,
+            t('revert_approval'),
+            async () => {
               try { await api.adminUnapproveShift(s.id); load(); }
               catch (e: any) { Alert.alert(t('failed'), e.message); }
-            } },
-          ]);
+            },
+          );
         },
       });
     }
