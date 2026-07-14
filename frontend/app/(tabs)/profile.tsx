@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Image, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -12,9 +12,17 @@ export default function Profile() {
   const router = useRouter();
 
   const doSignOut = () => {
+    const run = async () => {
+      await signOut();
+      router.replace('/login');
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${t('sign_out')}\n\n${t('sign_out_confirm')}`)) run();
+      return;
+    }
     Alert.alert(t('sign_out'), t('sign_out_confirm'), [
       { text: t('cancel'), style: 'cancel' },
-      { text: t('sign_out'), style: 'destructive', onPress: async () => { await signOut(); router.replace('/login'); } },
+      { text: t('sign_out'), style: 'destructive', onPress: run },
     ]);
   };
 
