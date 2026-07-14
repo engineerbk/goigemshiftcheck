@@ -18,7 +18,8 @@ export default function TabsLayout() {
   }
   if (!user) return <Redirect href="/login" />;
 
-  const isAdmin = user.role === 'admin';
+  const isOwner = user.role === 'owner' || user.role === 'admin';
+  const isManagement = isOwner || user.role === 'manager';
 
   return (
     <Tabs
@@ -68,7 +69,7 @@ export default function TabsLayout() {
         name="admin"
         options={{
           title: t('tab_admin'),
-          href: isAdmin ? '/(tabs)/admin' : null,
+          href: isManagement ? '/(tabs)/admin' : null,
           tabBarIcon: ({ color, size }) => <Ionicons name="shield-checkmark" size={size} color={color} />,
         }}
       />
@@ -76,7 +77,7 @@ export default function TabsLayout() {
         name="reports"
         options={{
           title: t('tab_reports'),
-          href: isAdmin ? '/(tabs)/reports' : null,
+          href: isOwner ? '/(tabs)/reports' : null,
           tabBarIcon: ({ color, size }) => <Ionicons name="bar-chart" size={size} color={color} />,
         }}
       />

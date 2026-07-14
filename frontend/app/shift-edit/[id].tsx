@@ -39,7 +39,7 @@ export default function ShiftEdit() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
 
   const load = useCallback(async () => {
     if (!id) return;

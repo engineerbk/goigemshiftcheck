@@ -91,7 +91,7 @@ export default function Calendar() {
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
 
   const confirmAction = (title: string, message: string, confirmText: string, run: () => Promise<void> | void, destructive = false) => {
     if (Platform.OS === 'web') {

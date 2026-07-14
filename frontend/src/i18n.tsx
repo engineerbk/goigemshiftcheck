@@ -84,6 +84,10 @@ const translations: Record<Lang, Record<string, string>> = {
     out: 'Out',
 
     role: 'Role',
+    role_owner: 'Owner',
+    role_manager: 'Manager',
+    role_employee: 'Employee',
+    manager_store_prompt: 'Assign manager to store',
     sign_out: 'Sign out',
     sign_out_confirm: 'Are you sure?',
     language: 'Language',
@@ -317,6 +321,10 @@ const translations: Record<Lang, Record<string, string>> = {
     out: 'Ra',
 
     role: 'Vai trò',
+    role_owner: 'Ông chủ',
+    role_manager: 'Quản lý',
+    role_employee: 'NV',
+    manager_store_prompt: 'Gán quản lý cho cửa hàng',
     sign_out: 'Đăng xuất',
     sign_out_confirm: 'Bạn có chắc?',
     language: 'Ngôn ngữ',

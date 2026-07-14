@@ -1,11 +1,13 @@
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TouchableOpacity, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { api } from '../../src/api';
+import { useAuth } from '../../src/auth';
 import { useLang } from '../../src/i18n';
 import { colors } from '../../src/theme';
+import { STORE_LOCATIONS } from '../../src/shift-options';
 import NotificationBell from '../../src/components/NotificationBell';
 
 function fmtDt(iso?: string | null) {
@@ -16,6 +18,7 @@ function fmtDt(iso?: string | null) {
 
 export default function Admin() {
   const { t } = useLang();
+  const { user } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<any>(null);
   const [employees, setEmployees] = useState<any[]>([]);
@@ -43,6 +46,36 @@ export default function Admin() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
+  const isOwner = user?.role === 'owner' || user?.role === 'admin';
+
+  const updateRole = async (target: any, role: 'employee' | 'manager' | 'owner', storeLocation = '') => {
+    const store = role === 'manager' ? storeLocation : '';
+    try {
+      await api.adminUpdateUserRole(target.id, role, store);
+      await load();
+    } catch (e: any) {
+      Alert.alert(t('failed'), e.message);
+    }
+  };
+
+  const assignManager = (target: any) => {
+    if (Platform.OS === 'web') {
+      const store = window.prompt(t('manager_store_prompt'), target.store_location || STORE_LOCATIONS[0]);
+      if (store) updateRole(target, 'manager', store);
+      return;
+    }
+    Alert.alert(
+      t('manager_store_prompt'),
+      target.name || target.email,
+      [
+        ...STORE_LOCATIONS.map((store) => ({
+          text: store,
+          onPress: () => updateRole(target, 'manager', store),
+        })),
+        { text: t('cancel'), style: 'cancel' as const },
+      ],
+    );
+  };
 
   if (loading) {
     return (
@@ -143,9 +176,27 @@ export default function Admin() {
             <View style={{ flex: 1 }}>
               <Text style={styles.rowTitle}>{u.name || '—'}</Text>
               <Text style={styles.rowSub}>{u.email}</Text>
+              {u.store_location ? <Text style={styles.rowSub}>📍 {u.store_location}</Text> : null}
             </View>
-            <View style={[styles.roleTag, u.role === 'admin' && styles.roleTagAdmin]}>
-              <Text style={[styles.roleTagText, u.role === 'admin' && styles.roleTagTextAdmin]}>{u.role}</Text>
+            <View style={styles.roleBox}>
+              <View style={[styles.roleTag, (u.role === 'admin' || u.role === 'owner' || u.role === 'manager') && styles.roleTagAdmin]}>
+                <Text style={[styles.roleTagText, (u.role === 'admin' || u.role === 'owner' || u.role === 'manager') && styles.roleTagTextAdmin]}>
+                  {u.role === 'admin' ? 'owner' : u.role}
+                </Text>
+              </View>
+              {isOwner && u.id !== user?.id ? (
+                <View style={styles.roleActions}>
+                  <TouchableOpacity style={styles.roleActionBtn} onPress={() => updateRole(u, 'employee')}>
+                    <Text style={styles.roleActionText}>{t('role_employee')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.roleActionBtn} onPress={() => assignManager(u)}>
+                    <Text style={styles.roleActionText}>{t('role_manager')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.roleActionBtn} onPress={() => updateRole(u, 'owner')}>
+                    <Text style={styles.roleActionText}>{t('role_owner')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
             </View>
           </View>
         ))}
@@ -222,6 +273,10 @@ const styles = StyleSheet.create({
   roleTagAdmin: { backgroundColor: '#EFF6FF' },
   roleTagText: { fontSize: 11, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
   roleTagTextAdmin: { color: colors.primary },
+  roleBox: { alignItems: 'flex-end', gap: 6, maxWidth: 170 },
+  roleActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' },
+  roleActionBtn: { backgroundColor: colors.secondary, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  roleActionText: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
   empty: { padding: 18, alignItems: 'center', backgroundColor: colors.background, borderRadius: 14, borderWidth: 1, borderColor: colors.border },
   emptyText: { color: colors.textMuted },
 });

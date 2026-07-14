@@ -25,6 +25,9 @@ JWT_ALGORITHM = "HS256"
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-me-" + uuid.uuid4().hex)
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@shift.com")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+OWNER_ROLES = {"owner", "admin"}  # keep legacy admin accounts as owners
+MANAGEMENT_ROLES = {"owner", "admin", "manager"}
+VALID_ROLES = {"owner", "admin", "manager", "employee"}
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -67,8 +70,32 @@ def clean_user(u: dict) -> dict:
         "email": u["email"],
         "name": u.get("name", ""),
         "role": u.get("role", "employee"),
+        "store_location": u.get("store_location", ""),
         "created_at": u.get("created_at"),
     }
+
+
+def is_owner(user: dict) -> bool:
+    return user.get("role") in OWNER_ROLES
+
+
+def is_manager(user: dict) -> bool:
+    return user.get("role") == "manager"
+
+
+def is_management(user: dict) -> bool:
+    return user.get("role") in MANAGEMENT_ROLES
+
+
+def scoped_store_query(user: dict) -> dict:
+    if is_owner(user):
+        return {}
+    if is_manager(user):
+        store = user.get("store_location") or ""
+        if not store:
+            raise HTTPException(status_code=403, detail="Manager account has no assigned store")
+        return {"store_location": store}
+    raise HTTPException(status_code=403, detail="Management access required")
 
 
 async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> dict:
@@ -90,8 +117,14 @@ async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] =
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+    if not is_management(user):
+        raise HTTPException(status_code=403, detail="Management access required")
+    return user
+
+
+async def require_owner(user: dict = Depends(get_current_user)) -> dict:
+    if not is_owner(user):
+        raise HTTPException(status_code=403, detail="Owner access required")
     return user
 
 
@@ -124,6 +157,11 @@ class CheckInRequest(BaseModel):
     local_time: Optional[str] = None  # HH:MM in user's local timezone
 
 
+class UserRoleUpdate(BaseModel):
+    role: str
+    store_location: Optional[str] = ""
+
+
 # ---------------- Notifications helpers ----------------
 async def _notify(user_id: str, ntype: str, title: str, body: str = "", data: Optional[dict] = None) -> None:
     if not user_id:
@@ -150,6 +188,21 @@ def _hhmm_to_min(hhmm: str) -> Optional[int]:
         return int(h) * 60 + int(m)
     except Exception:
         return None
+
+
+async def swap_touches_store(req: dict, store: str) -> bool:
+    if not store:
+        return False
+    shift_ids = [req.get("my_shift_id"), req.get("target_shift_id")]
+    shift_ids = [sid for sid in shift_ids if sid]
+    if not shift_ids:
+        ns = req.get("new_shift") or {}
+        return ns.get("store_location") == store
+    count = await db.shifts.count_documents({"id": {"$in": shift_ids}, "store_location": store})
+    if count > 0:
+        return True
+    ns = req.get("new_shift") or {}
+    return ns.get("store_location") == store
 
 
 # ---------------- Auth Routes ----------------
@@ -206,8 +259,12 @@ async def create_shift(payload: ShiftCreate, user: dict = Depends(get_current_us
     }
     await db.shifts.insert_one(shift)
     shift.pop("_id", None)
-    # Notify all admins about the new shift awaiting approval
-    admins = await db.users.find({"role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
+    # Notify owners and the manager for this store about the new shift awaiting approval.
+    admin_query = {"$or": [
+        {"role": {"$in": list(OWNER_ROLES)}},
+        {"role": "manager", "store_location": shift["store_location"]},
+    ]}
+    admins = await db.users.find(admin_query, {"_id": 0, "id": 1}).to_list(50)
     for a in admins:
         await _notify(
             a["id"], "shift_pending_approval",
@@ -246,8 +303,12 @@ async def update_my_shift(shift_id: str, payload: ShiftCreate, user: dict = Depe
     }
     await db.shifts.update_one({"id": shift_id, "user_id": user["id"]}, {"$set": update})
     new_sh = await db.shifts.find_one({"id": shift_id}, {"_id": 0})
-    # Notify admins so they see the updated request in their queue
-    admins = await db.users.find({"role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
+    # Notify owners and the manager for this store so they see the updated request.
+    admin_query = {"$or": [
+        {"role": {"$in": list(OWNER_ROLES)}},
+        {"role": "manager", "store_location": new_sh.get("store_location", "")},
+    ]}
+    admins = await db.users.find(admin_query, {"_id": 0, "id": 1}).to_list(50)
     for a in admins:
         await _notify(
             a["id"], "shift_pending_approval",
@@ -386,30 +447,61 @@ async def my_attendance(user: dict = Depends(get_current_user)):
 
 # ---------------- Admin Routes ----------------
 @api_router.get("/admin/employees")
-async def admin_employees(_: dict = Depends(require_admin)):
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(1000)
+async def admin_employees(admin: dict = Depends(require_admin)):
+    query = {} if is_owner(admin) else {"$or": [
+        {"role": "employee"},
+        {"store_location": admin.get("store_location", "")},
+    ]}
+    users = await db.users.find(query, {"_id": 0, "password_hash": 0}).to_list(1000)
     return users
 
 
+@api_router.patch("/admin/users/{user_id}/role")
+async def admin_update_user_role(user_id: str, payload: UserRoleUpdate, _: dict = Depends(require_owner)):
+    if payload.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    update = {
+        "role": payload.role,
+        "store_location": payload.store_location or "",
+    }
+    if payload.role == "manager" and not update["store_location"]:
+        raise HTTPException(status_code=400, detail="Manager must be assigned to a store")
+    res = await db.users.update_one({"id": user_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+
+
 @api_router.get("/admin/attendance")
-async def admin_attendance(_: dict = Depends(require_admin)):
-    records = await db.attendance.find({}, {"_id": 0}).sort("check_in", -1).to_list(1000)
+async def admin_attendance(admin: dict = Depends(require_admin)):
+    if is_owner(admin):
+        records = await db.attendance.find({}, {"_id": 0}).sort("check_in", -1).to_list(1000)
+    else:
+        store = admin.get("store_location", "")
+        shift_ids = [s["id"] for s in await db.shifts.find({"store_location": store}, {"_id": 0, "id": 1}).to_list(5000)]
+        records = await db.attendance.find({"shift_id": {"$in": shift_ids}}, {"_id": 0}).sort("check_in", -1).to_list(1000)
     return records
 
 
 @api_router.get("/admin/shifts")
-async def admin_shifts(_: dict = Depends(require_admin)):
-    shifts = await db.shifts.find({}, {"_id": 0}).sort("date", -1).to_list(1000)
+async def admin_shifts(admin: dict = Depends(require_admin)):
+    shifts = await db.shifts.find(scoped_store_query(admin), {"_id": 0}).sort("date", -1).to_list(1000)
     return shifts
 
 
 @api_router.get("/admin/stats")
-async def admin_stats(_: dict = Depends(require_admin)):
+async def admin_stats(admin: dict = Depends(require_admin)):
+    shift_query = scoped_store_query(admin)
     total_employees = await db.users.count_documents({"role": "employee"})
-    active_now = await db.attendance.count_documents({"check_out": None})
-    total_shifts = await db.shifts.count_documents({})
+    if is_owner(admin):
+        active_now = await db.attendance.count_documents({"check_out": None})
+    else:
+        store = admin.get("store_location", "")
+        shift_ids = [s["id"] for s in await db.shifts.find({"store_location": store}, {"_id": 0, "id": 1}).to_list(5000)]
+        active_now = await db.attendance.count_documents({"check_out": None, "shift_id": {"$in": shift_ids}})
+    total_shifts = await db.shifts.count_documents(shift_query)
     today = datetime.now(timezone.utc).date().isoformat()
-    shifts_today = await db.shifts.count_documents({"date": today})
+    shifts_today = await db.shifts.count_documents({**shift_query, "date": today})
     return {
         "total_employees": total_employees,
         "active_now": active_now,
@@ -419,7 +511,7 @@ async def admin_stats(_: dict = Depends(require_admin)):
 
 
 @api_router.get("/admin/reports")
-async def admin_reports(period: str = "all", _: dict = Depends(require_admin)):
+async def admin_reports(period: str = "all", _: dict = Depends(require_owner)):
     now = datetime.now(timezone.utc)
     start: Optional[datetime] = None
     if period == "week":
@@ -481,7 +573,7 @@ async def admin_reports(period: str = "all", _: dict = Depends(require_admin)):
 
 
 @api_router.get("/admin/reports/monthly")
-async def admin_reports_monthly(months: int = 6, _: dict = Depends(require_admin)):
+async def admin_reports_monthly(months: int = 6, _: dict = Depends(require_owner)):
     months = max(1, min(months, 24))
     now = datetime.now(timezone.utc)
     # Compute a list of (year, month) anchors for the last `months` months (chronological)
@@ -531,7 +623,7 @@ async def admin_reports_monthly(months: int = 6, _: dict = Depends(require_admin
 
 
 @api_router.get("/admin/reports/{user_id}")
-async def admin_employee_report(user_id: str, period: str = "all", _: dict = Depends(require_admin)):
+async def admin_employee_report(user_id: str, period: str = "all", _: dict = Depends(require_owner)):
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -593,7 +685,7 @@ async def admin_employee_report(user_id: str, period: str = "all", _: dict = Dep
 
 
 @api_router.get("/admin/reports.csv")
-async def admin_reports_export(period: str = "all", _: dict = Depends(require_admin)):
+async def admin_reports_export(period: str = "all", _: dict = Depends(require_owner)):
     data = await admin_reports(period=period)  # type: ignore
     rows = data["rows"]
     out = io.StringIO()
@@ -616,7 +708,7 @@ async def admin_reports_export(period: str = "all", _: dict = Depends(require_ad
 
 
 @api_router.get("/admin/reports/{user_id}/export.csv")
-async def admin_employee_export(user_id: str, period: str = "all", _: dict = Depends(require_admin)):
+async def admin_employee_export(user_id: str, period: str = "all", _: dict = Depends(require_owner)):
     data = await admin_employee_report(user_id=user_id, period=period)  # type: ignore
     emp = data["employee"]
     sessions = data["sessions"]
@@ -661,7 +753,7 @@ async def admin_employee_export(user_id: str, period: str = "all", _: dict = Dep
 
 
 @api_router.get("/admin/reports.xlsx")
-async def admin_reports_xlsx(period: str = "all", _: dict = Depends(require_admin)):
+async def admin_reports_xlsx(period: str = "all", _: dict = Depends(require_owner)):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
 
@@ -798,6 +890,11 @@ async def admin_update_shift(shift_id: str, payload: ShiftUpdate, admin: dict = 
     old_shift = await db.shifts.find_one({"id": shift_id}, {"_id": 0})
     if not old_shift:
         raise HTTPException(status_code=404, detail="Shift not found")
+    if is_manager(admin):
+        manager_store = admin.get("store_location", "")
+        target_store = update.get("store_location", old_shift.get("store_location", ""))
+        if old_shift.get("store_location") != manager_store or target_store != manager_store:
+            raise HTTPException(status_code=403, detail="Managers can only edit shifts in their store")
     if "user_id" in update:
         new_user = await db.users.find_one({"id": update["user_id"]}, {"_id": 0})
         if not new_user:
@@ -828,7 +925,13 @@ async def admin_update_shift(shift_id: str, payload: ShiftUpdate, admin: dict = 
 
 
 @api_router.delete("/admin/shifts/{shift_id}")
-async def admin_delete_shift(shift_id: str, _: dict = Depends(require_admin)):
+async def admin_delete_shift(shift_id: str, admin: dict = Depends(require_admin)):
+    if is_manager(admin):
+        sh = await db.shifts.find_one({"id": shift_id}, {"_id": 0})
+        if not sh:
+            raise HTTPException(status_code=404, detail="Shift not found")
+        if sh.get("store_location") != admin.get("store_location", ""):
+            raise HTTPException(status_code=403, detail="Managers can only delete shifts in their store")
     res = await db.shifts.delete_one({"id": shift_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Shift not found")
@@ -840,6 +943,8 @@ async def admin_approve_shift(shift_id: str, admin: dict = Depends(require_admin
     sh = await db.shifts.find_one({"id": shift_id}, {"_id": 0})
     if not sh:
         raise HTTPException(status_code=404, detail="Shift not found")
+    if is_manager(admin) and sh.get("store_location") != admin.get("store_location", ""):
+        raise HTTPException(status_code=403, detail="Managers can only approve shifts in their store")
     await db.shifts.update_one({"id": shift_id}, {"$set": {
         "approval_status": "approved",
         "approved_at": datetime.now(timezone.utc).isoformat(),
@@ -865,6 +970,8 @@ async def admin_reject_shift(shift_id: str, payload: ShiftRejectBody, admin: dic
     sh = await db.shifts.find_one({"id": shift_id}, {"_id": 0})
     if not sh:
         raise HTTPException(status_code=404, detail="Shift not found")
+    if is_manager(admin) and sh.get("store_location") != admin.get("store_location", ""):
+        raise HTTPException(status_code=403, detail="Managers can only reject shifts in their store")
     await db.shifts.update_one({"id": shift_id}, {"$set": {
         "approval_status": "rejected",
         "rejected_at": datetime.now(timezone.utc).isoformat(),
@@ -885,9 +992,12 @@ async def admin_reject_shift(shift_id: str, payload: ShiftRejectBody, admin: dic
 
 
 @api_router.get("/admin/shifts/pending")
-async def admin_pending_shifts(_: dict = Depends(require_admin)):
+async def admin_pending_shifts(admin: dict = Depends(require_admin)):
+    query = {"approval_status": {"$in": [None, "pending"]}}
+    if is_manager(admin):
+        query["store_location"] = admin.get("store_location", "")
     items = await db.shifts.find(
-        {"approval_status": {"$in": [None, "pending"]}},
+        query,
         {"_id": 0},
     ).sort("date", 1).to_list(500)
     return items
@@ -898,6 +1008,8 @@ async def admin_unapprove_shift(shift_id: str, admin: dict = Depends(require_adm
     sh = await db.shifts.find_one({"id": shift_id}, {"_id": 0})
     if not sh:
         raise HTTPException(status_code=404, detail="Shift not found")
+    if is_manager(admin) and sh.get("store_location") != admin.get("store_location", ""):
+        raise HTTPException(status_code=403, detail="Managers can only update shifts in their store")
     if sh.get("approval_status") != "approved":
         raise HTTPException(status_code=400, detail="Shift is not currently approved")
     await db.shifts.update_one({"id": shift_id}, {"$set": {
@@ -998,7 +1110,11 @@ async def create_swap(payload: SwapCreate, user: dict = Depends(get_current_user
         )
         # If requires admin, also notify admins
         if requires_admin:
-            admins = await db.users.find({"role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
+            admins = await db.users.find({"$or": [
+                {"role": {"$in": list(OWNER_ROLES)}},
+                {"role": "manager", "store_location": target.get("store_location", "")},
+                {"role": "manager", "store_location": mine.get("store_location", "")},
+            ]}, {"_id": 0, "id": 1}).to_list(50)
             for a in admins:
                 await _notify(
                     a["id"], "swap_pending_admin",
@@ -1023,7 +1139,11 @@ async def create_swap(payload: SwapCreate, user: dict = Depends(get_current_user
     await db.swap_requests.insert_one(rec)
     rec.pop("_id", None)
     # Notify all admins
-    admins = await db.users.find({"role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
+    admins = await db.users.find({"$or": [
+        {"role": {"$in": list(OWNER_ROLES)}},
+        {"role": "manager", "store_location": ns.store_location if ns else ""},
+        {"role": "manager", "store_location": mine.get("store_location", "")},
+    ]}, {"_id": 0, "id": 1}).to_list(50)
     for a in admins:
         await _notify(
             a["id"], "swap_new_request",
@@ -1124,8 +1244,15 @@ async def reject_swap(rid: str, user: dict = Depends(get_current_user)):
 
 # ---------------- Admin: swap override + listing ----------------
 @api_router.get("/admin/swap-requests")
-async def admin_list_swaps(_: dict = Depends(require_admin)):
+async def admin_list_swaps(admin: dict = Depends(require_admin)):
     items = await db.swap_requests.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    if is_manager(admin):
+        store = admin.get("store_location", "")
+        filtered = []
+        for item in items:
+            if await swap_touches_store(item, store):
+                filtered.append(item)
+        items = filtered
     return items
 
 
@@ -1134,6 +1261,8 @@ async def admin_force_approve(rid: str, admin: dict = Depends(require_admin)):
     req = await db.swap_requests.find_one({"id": rid}, {"_id": 0})
     if not req:
         raise HTTPException(status_code=404, detail="Not found")
+    if is_manager(admin) and not await swap_touches_store(req, admin.get("store_location", "")):
+        raise HTTPException(status_code=403, detail="Managers can only approve swaps for their store")
     if req["status"] != "pending":
         raise HTTPException(status_code=400, detail="Already resolved")
     await _do_swap(req)
@@ -1143,7 +1272,8 @@ async def admin_force_approve(rid: str, admin: dict = Depends(require_admin)):
     }})
     msg = f"Admin {admin.get('name', 'Admin')} approved this swap."
     await _notify(req["from_user_id"], "swap_accepted", "Swap approved by admin", msg, {"swap_id": rid})
-    await _notify(req["to_user_id"], "swap_accepted", "Swap approved by admin", msg, {"swap_id": rid})
+    if req.get("to_user_id"):
+        await _notify(req["to_user_id"], "swap_accepted", "Swap approved by admin", msg, {"swap_id": rid})
     return {"ok": True}
 
 
@@ -1152,6 +1282,8 @@ async def admin_force_reject(rid: str, admin: dict = Depends(require_admin)):
     req = await db.swap_requests.find_one({"id": rid}, {"_id": 0})
     if not req:
         raise HTTPException(status_code=404, detail="Not found")
+    if is_manager(admin) and not await swap_touches_store(req, admin.get("store_location", "")):
+        raise HTTPException(status_code=403, detail="Managers can only reject swaps for their store")
     if req["status"] != "pending":
         raise HTTPException(status_code=400, detail="Already resolved")
     await db.swap_requests.update_one({"id": rid}, {"$set": {
@@ -1161,7 +1293,8 @@ async def admin_force_reject(rid: str, admin: dict = Depends(require_admin)):
     }})
     msg = f"Admin {admin.get('name', 'Admin')} rejected this swap."
     await _notify(req["from_user_id"], "swap_rejected", "Swap rejected by admin", msg, {"swap_id": rid})
-    await _notify(req["to_user_id"], "swap_rejected", "Swap rejected by admin", msg, {"swap_id": rid})
+    if req.get("to_user_id"):
+        await _notify(req["to_user_id"], "swap_rejected", "Swap rejected by admin", msg, {"swap_id": rid})
     return {"ok": True}
 
 
@@ -1231,6 +1364,7 @@ async def startup_event():
             "name": "Admin",
             "password_hash": hash_password(ADMIN_PASSWORD),
             "role": "admin",
+            "store_location": "",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.users.insert_one(admin)
@@ -1238,7 +1372,7 @@ async def startup_event():
     elif not verify_password(ADMIN_PASSWORD, existing["password_hash"]):
         await db.users.update_one(
             {"email": ADMIN_EMAIL.lower()},
-            {"$set": {"password_hash": hash_password(ADMIN_PASSWORD), "role": "admin"}},
+            {"$set": {"password_hash": hash_password(ADMIN_PASSWORD), "role": "admin", "store_location": ""}},
         )
         logger.info(f"Updated admin password: {ADMIN_EMAIL}")
 
