@@ -280,6 +280,12 @@ async def attendance_status(user: dict = Depends(get_current_user)):
     open_record = await db.attendance.find_one(
         {"user_id": user["id"], "check_out": None}, {"_id": 0}
     )
+    if open_record and open_record.get("shift_id"):
+        sh = await db.shifts.find_one({"id": open_record["shift_id"]}, {"_id": 0})
+        if sh:
+            open_record["shift_type"] = sh.get("shift_type", open_record.get("shift_type", ""))
+            open_record["shift_start_time"] = sh.get("start_time", open_record.get("shift_start_time"))
+            open_record["shift_end_time"] = sh.get("end_time", open_record.get("shift_end_time"))
     return {"checked_in": bool(open_record), "current": open_record}
 
 
@@ -294,6 +300,7 @@ async def check_in(payload: CheckInRequest, user: dict = Depends(get_current_use
     matched_shift_id: Optional[str] = None
     matched_shift_start: Optional[str] = None
     matched_shift_end: Optional[str] = None
+    matched_shift_type: Optional[str] = None
     if payload.local_date and payload.local_time:
         sh = await db.shifts.find_one(
             {"user_id": user["id"], "date": payload.local_date},
@@ -307,6 +314,7 @@ async def check_in(payload: CheckInRequest, user: dict = Depends(get_current_use
                 matched_shift_id = sh.get("id")
                 matched_shift_start = sh.get("start_time")
                 matched_shift_end = sh.get("end_time")
+                matched_shift_type = sh.get("shift_type")
 
     record = {
         "id": str(uuid.uuid4()),
@@ -330,6 +338,7 @@ async def check_in(payload: CheckInRequest, user: dict = Depends(get_current_use
         "shift_id": matched_shift_id,
         "shift_start_time": matched_shift_start,
         "shift_end_time": matched_shift_end,
+        "shift_type": matched_shift_type,
     }
     await db.attendance.insert_one(record)
     record.pop("_id", None)

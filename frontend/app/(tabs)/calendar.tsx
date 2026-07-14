@@ -7,8 +7,8 @@ import { api } from '../../src/api';
 import { useAuth } from '../../src/auth';
 import { useLang } from '../../src/i18n';
 import { colors } from '../../src/theme';
+import { STORE_LOCATIONS, SHIFT_PRESETS } from '../../src/shift-options';
 import NotificationBell from '../../src/components/NotificationBell';
-import ApprovalBadge from '../../src/components/ApprovalBadge';
 
 function startOfWeek(d: Date) {
   const x = new Date(d);
@@ -25,11 +25,43 @@ function fmtDate(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+const STORE_META: Record<string, { code: string; capacity: number }> = {
+  '74 Hàng Nón': { code: 'NON', capacity: 2 },
+  '4B Trần Phú': { code: 'TPU', capacity: 2 },
+  '32 Hàng Bè': { code: 'HBE', capacity: 2 },
+  '07 Nhà Chung': { code: 'NCH', capacity: 2 },
+  '53 Lương Ngọc Quyến': { code: 'LNQ', capacity: 2 },
+  '13 Lý Quốc Sư': { code: 'QSU', capacity: 3 },
+  'Kho Tổng 22-89C': { code: 'KHO TỔNG', capacity: 1 },
+};
+
+function shortStoreName(name: string) {
+  return name.replace('Kho Tổng 22-89C', 'Kho Tổng');
+}
+
+function staffingState(count: number, capacity: number) {
+  if (count <= 0) return 'empty';
+  if (count < capacity) return 'short';
+  return 'full';
+}
+
+function statusColor(state: string) {
+  if (state === 'full') return colors.success;
+  if (state === 'short') return '#FACC15';
+  return colors.error;
+}
+
+function matchesPreset(s: any, preset: { type: string; start: string; end: string }) {
+  return s.shift_type === preset.type || (!s.shift_type && s.start_time === preset.start && s.end_time === preset.end);
+}
+
 export default function Calendar() {
   const { user } = useAuth();
   const { t } = useLang();
   const router = useRouter();
   const [weekStart, setWeekStart] = useState<Date>(startOfWeek(new Date()));
+  const [selectedDate, setSelectedDate] = useState<string>(fmtDate(new Date()));
+  const [selectedShiftType, setSelectedShiftType] = useState<'morning' | 'afternoon' | 'evening'>('afternoon');
   const [shifts, setShifts] = useState<any[]>([]);
   const [swaps, setSwaps] = useState<{ incoming: any[]; outgoing: any[] }>({ incoming: [], outgoing: [] });
   const [loading, setLoading] = useState(true);
@@ -60,6 +92,19 @@ export default function Calendar() {
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const isAdmin = user?.role === 'admin';
+
+  const moveWeek = (delta: number) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + delta * 7);
+    setWeekStart(d);
+    setSelectedDate(fmtDate(d));
+  };
+
+  const goToday = () => {
+    const today = new Date();
+    setWeekStart(startOfWeek(today));
+    setSelectedDate(fmtDate(today));
+  };
 
   const onShiftPress = (s: any) => {
     const isMine = s.user_id === user?.id;
@@ -135,7 +180,28 @@ export default function Calendar() {
     catch (e: any) { Alert.alert(t('failed'), e.message); }
   };
 
+  const onCellPress = (items: any[]) => {
+    if (items.length === 0) return;
+    if (items.length === 1) {
+      onShiftPress(items[0]);
+      return;
+    }
+    Alert.alert(
+      t('select_shift'),
+      '',
+      [
+        ...items.map((s) => ({
+          text: s.user_name || s.user_email,
+          onPress: () => onShiftPress(s),
+        })),
+        { text: t('cancel'), style: 'cancel' as const },
+      ],
+    );
+  };
+
   const pendingIncoming = swaps.incoming.filter(s => s.status === 'pending');
+  const selectedDayShifts = shifts.filter(s => s.date === selectedDate);
+  const selectedPreset = SHIFT_PRESETS.find(p => p.type === selectedShiftType) || SHIFT_PRESETS[1];
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="calendar-screen">
@@ -146,26 +212,59 @@ export default function Calendar() {
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>{t('calendar_title')}</Text>
-            <Text style={styles.sub}>{t('calendar_sub')}</Text>
+            <View style={styles.legendRow}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.success }]} />
+                <Text style={styles.legendText}>{t('staff_full')}</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: '#FACC15' }]} />
+                <Text style={styles.legendText}>{t('staff_short')}</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.error }]} />
+                <Text style={styles.legendText}>{t('staff_empty')}</Text>
+              </View>
+            </View>
           </View>
           <NotificationBell />
         </View>
 
         <View style={styles.weekNav}>
-          <TouchableOpacity testID="week-prev" style={styles.navBtn} onPress={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d); }}>
-            <Ionicons name="chevron-back" size={20} color={colors.textMain} />
+          <TouchableOpacity testID="week-prev" style={styles.navBtn} onPress={() => moveWeek(-1)}>
+            <Ionicons name="chevron-back" size={28} color={colors.textMain} />
           </TouchableOpacity>
           <View style={{ flex: 1, alignItems: 'center' }}>
             <Text style={styles.weekRange}>
               {days[0].toLocaleDateString([], { month: 'short', day: 'numeric' })} – {days[6].toLocaleDateString([], { month: 'short', day: 'numeric' })}
             </Text>
-            <TouchableOpacity onPress={() => setWeekStart(startOfWeek(new Date()))}>
+            <TouchableOpacity onPress={goToday}>
               <Text style={styles.todayLink}>{t('today_btn')}</Text>
             </TouchableOpacity>
           </View>
-          <TouchableOpacity testID="week-next" style={styles.navBtn} onPress={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d); }}>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMain} />
+          <TouchableOpacity testID="week-next" style={styles.navBtn} onPress={() => moveWeek(1)}>
+            <Ionicons name="chevron-forward" size={28} color={colors.textMain} />
           </TouchableOpacity>
+        </View>
+
+        <View style={styles.dayTabs}>
+          {days.map((d) => {
+            const dStr = fmtDate(d);
+            const active = selectedDate === dStr;
+            return (
+              <TouchableOpacity
+                key={dStr}
+                testID={`cal-day-${dStr}`}
+                style={[styles.dayTab, active && styles.dayTabActive]}
+                onPress={() => setSelectedDate(dStr)}
+              >
+                <Text style={[styles.dayTabName, active && styles.dayTabTextActive]}>
+                  {d.toLocaleDateString([], { weekday: 'short' }).toUpperCase()}
+                </Text>
+                <Text style={[styles.dayTabNum, active && styles.dayTabTextActive]}>{d.getDate()}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {pendingIncoming.length > 0 && (
@@ -195,53 +294,86 @@ export default function Calendar() {
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
         ) : (
-          days.map((d, idx) => {
-            const dStr = fmtDate(d);
-            const dayShifts = shifts.filter(s => s.date === dStr);
-            const isToday = fmtDate(new Date()) === dStr;
-            return (
-              <View key={dStr} style={styles.dayBlock}>
-                <View style={styles.dayHeader}>
-                  <View style={[styles.dayBadge, isToday && styles.dayBadgeToday]}>
-                    <Text style={[styles.dayBadgeNum, isToday && { color: colors.primaryFg }]}>{d.getDate()}</Text>
+          <View style={styles.roster}>
+            <View style={styles.gridHeader}>
+              <View style={styles.storeHeaderSpacer} />
+              {SHIFT_PRESETS.map((preset) => {
+                const active = selectedShiftType === preset.type;
+                return (
+                  <TouchableOpacity
+                    key={preset.type}
+                    style={[styles.shiftHeader, active && styles.shiftHeaderActive]}
+                    onPress={() => setSelectedShiftType(preset.type)}
+                    testID={`cal-shift-type-${preset.type}`}
+                  >
+                    <Text style={[styles.shiftHeaderText, active && styles.shiftHeaderTextActive]}>
+                      {t(`shift_${preset.type}` as any)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {STORE_LOCATIONS.map((store) => {
+              const meta = STORE_META[store] || { code: store.slice(0, 3).toUpperCase(), capacity: 2 };
+              const selectedCount = selectedDayShifts.filter(s => {
+                const preset = SHIFT_PRESETS.find(p => p.type === selectedShiftType);
+                return s.store_location === store && preset && matchesPreset(s, preset);
+              }).length;
+              const state = staffingState(selectedCount, meta.capacity);
+              return (
+                <View key={store} style={styles.gridRow}>
+                  <View style={styles.storeCell}>
+                    <Text style={[styles.storeCode, { color: statusColor(state) }]}>{meta.code}</Text>
+                    <Text style={styles.storeName} numberOfLines={1}>{shortStoreName(store)}</Text>
+                    <View style={styles.storeCountRow}>
+                      <View style={[styles.storeStatusDot, { backgroundColor: statusColor(state) }]} />
+                      <Text style={[styles.storeCount, { color: statusColor(state) }]}>
+                        {selectedCount}/{meta.capacity}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={styles.dayName}>{d.toLocaleDateString([], { weekday: 'long' })}</Text>
-                  <Text style={styles.dayCount}>{dayShifts.length}</Text>
-                </View>
-                {dayShifts.length === 0 ? (
-                  <Text style={styles.dayEmpty}>{t('no_shifts_day')}</Text>
-                ) : (
-                  dayShifts.map(s => {
-                    const mine = s.user_id === user?.id;
+
+                  {SHIFT_PRESETS.map((preset) => {
+                    const activeColumn = selectedShiftType === preset.type;
+                    const cellShifts = selectedDayShifts.filter(s => s.store_location === store && matchesPreset(s, preset));
                     return (
                       <TouchableOpacity
-                        key={s.id}
-                        testID={`cal-shift-${s.id}`}
-                        style={[styles.shiftPill, mine && styles.shiftPillMine]}
-                        onPress={() => onShiftPress(s)}
+                        key={`${store}-${preset.type}`}
+                        style={[styles.rosterCell, activeColumn && styles.rosterCellActive]}
+                        onPress={() => onCellPress(cellShifts)}
+                        disabled={cellShifts.length === 0}
+                        testID={`cal-cell-${store}-${preset.type}`}
                       >
-                        <View style={styles.shiftTimeBox}>
-                          <Text style={[styles.shiftTime, mine && styles.shiftTimeMine]}>{s.start_time}</Text>
-                          <Text style={styles.shiftDash}>–</Text>
-                          <Text style={[styles.shiftTime, mine && styles.shiftTimeMine]}>{s.end_time}</Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.shiftName, mine && styles.shiftNameMine]} numberOfLines={1}>
-                            {s.user_name || s.user_email}{mine ? '  •  ' + t('actions').toLowerCase() : ''}
-                          </Text>
-                          {s.note ? <Text style={styles.shiftNote} numberOfLines={1}>{s.note}</Text> : null}
-                          <View style={{ marginTop: 4 }}>
-                            <ApprovalBadge status={s.approval_status} size="tiny" />
-                          </View>
-                        </View>
-                        <Ionicons name="chevron-forward" size={16} color={mine ? colors.primary : colors.textLight} />
+                        {cellShifts.length === 0 ? (
+                          activeColumn && store === 'Kho Tổng 22-89C' ? <Text style={styles.offText}>OFF</Text> : null
+                        ) : (
+                          cellShifts.slice(0, 3).map((s) => {
+                            const mine = s.user_id === user?.id;
+                            return (
+                              <Text
+                                key={s.id}
+                                style={[styles.staffName, activeColumn && styles.staffNameActive, mine && styles.staffNameMine]}
+                                numberOfLines={1}
+                              >
+                                {s.user_name || s.user_email}
+                              </Text>
+                            );
+                          })
+                        )}
+                        {cellShifts.length > 3 ? (
+                          <Text style={[styles.moreText, activeColumn && styles.moreTextActive]}>+{cellShifts.length - 3}</Text>
+                        ) : null}
                       </TouchableOpacity>
                     );
-                  })
-                )}
-              </View>
-            );
-          })
+                  })}
+                </View>
+              );
+            })}
+            <Text style={styles.gridFootnote}>
+              {t('selected_shift')}: {t(`shift_${selectedPreset.type}` as any)} {selectedPreset.start} - {selectedPreset.end}
+            </Text>
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -250,14 +382,23 @@ export default function Calendar() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  container: { padding: 20, paddingBottom: 40 },
-  title: { fontSize: 26, fontWeight: '800', color: colors.textMain, letterSpacing: -0.5 },
-  sub: { color: colors.textMuted, marginTop: 6, marginBottom: 16 },
+  container: { padding: 18, paddingBottom: 30 },
+  title: { fontSize: 32, fontWeight: '900', color: colors.textMain, letterSpacing: 0, marginBottom: 18 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  weekNav: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.background, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 6, marginBottom: 18 },
-  navBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
-  weekRange: { fontSize: 16, fontWeight: '700', color: colors.textMain },
-  todayLink: { color: colors.primary, fontSize: 12, fontWeight: '600', marginTop: 2 },
+  legendRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginBottom: 22 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  legendDot: { width: 10, height: 10, borderRadius: 5, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 2 },
+  legendText: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
+  weekNav: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.background, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 8, marginBottom: 8 },
+  navBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
+  weekRange: { fontSize: 19, fontWeight: '900', color: colors.textMain },
+  todayLink: { color: colors.primary, fontSize: 13, fontWeight: '800', marginTop: 2 },
+  dayTabs: { flexDirection: 'row', gap: 4, marginBottom: 14 },
+  dayTab: { flex: 1, height: 62, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  dayTabActive: { backgroundColor: colors.primary },
+  dayTabName: { fontSize: 12, fontWeight: '900', color: colors.textMuted },
+  dayTabNum: { fontSize: 21, fontWeight: '900', color: colors.textMain, marginTop: 2 },
+  dayTabTextActive: { color: colors.primaryFg },
   section: { marginTop: 4, marginBottom: 10, fontSize: 15, fontWeight: '700', color: colors.textMain },
   swapCard: { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 14, padding: 14, marginBottom: 10 },
   swapFrom: { fontWeight: '700', color: colors.textMain },
@@ -268,25 +409,31 @@ const styles = StyleSheet.create({
   swapAccept: { backgroundColor: colors.primary, borderColor: colors.primary },
   swapBtnText: { color: colors.textMain, fontWeight: '700', fontSize: 13 },
   swapBtnTextAccept: { color: colors.primaryFg, fontWeight: '700', fontSize: 13 },
-  dayBlock: { marginBottom: 14 },
-  dayHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  dayBadge: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.secondary, alignItems: 'center', justifyContent: 'center' },
-  dayBadgeToday: { backgroundColor: colors.primary },
-  dayBadgeNum: { fontWeight: '800', color: colors.textMain, fontSize: 13 },
-  dayName: { flex: 1, fontWeight: '700', color: colors.textMain, fontSize: 14 },
-  dayCount: { fontSize: 12, color: colors.textLight, fontWeight: '600' },
-  dayEmpty: { color: colors.textLight, fontSize: 12, paddingLeft: 42, fontStyle: 'italic' },
-  shiftPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: colors.background, borderRadius: 12, padding: 10,
-    borderWidth: 1, borderColor: colors.border, marginBottom: 6, marginLeft: 0,
+  roster: { marginTop: 2 },
+  gridHeader: { flexDirection: 'row', gap: 7, alignItems: 'flex-end', marginBottom: 7 },
+  storeHeaderSpacer: { width: 78 },
+  shiftHeader: { flex: 1, minHeight: 40, borderTopLeftRadius: 12, borderTopRightRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  shiftHeaderActive: { backgroundColor: colors.primary },
+  shiftHeaderText: { color: colors.textMuted, fontWeight: '900', fontSize: 15 },
+  shiftHeaderTextActive: { color: colors.primaryFg },
+  gridRow: { flexDirection: 'row', gap: 7, marginBottom: 8 },
+  storeCell: { width: 78, justifyContent: 'center' },
+  storeCode: { fontSize: 17, fontWeight: '900', lineHeight: 19 },
+  storeName: { color: colors.textMuted, fontSize: 9, fontWeight: '800', marginTop: 1 },
+  storeCountRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  storeStatusDot: { width: 13, height: 13, borderRadius: 7 },
+  storeCount: { fontSize: 13, fontWeight: '900' },
+  rosterCell: {
+    flex: 1, minHeight: 82, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 9,
+    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
+    justifyContent: 'center',
   },
-  shiftPillMine: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' },
-  shiftTimeBox: { alignItems: 'center', minWidth: 60 },
-  shiftTime: { fontWeight: '700', fontSize: 12, color: colors.textMain },
-  shiftTimeMine: { color: colors.primary },
-  shiftDash: { fontSize: 9, color: colors.textLight, marginVertical: 1 },
-  shiftName: { fontSize: 13, fontWeight: '600', color: colors.textMain },
-  shiftNameMine: { color: colors.primary },
-  shiftNote: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  rosterCellActive: { borderWidth: 6, borderColor: colors.primary, paddingHorizontal: 6, paddingVertical: 6 },
+  staffName: { color: colors.textLight, fontSize: 16, fontWeight: '900', lineHeight: 24 },
+  staffNameActive: { color: colors.textMain },
+  staffNameMine: { color: colors.primary },
+  moreText: { color: colors.textLight, fontWeight: '900', fontSize: 12, marginTop: 2 },
+  moreTextActive: { color: colors.textMain },
+  offText: { color: colors.textMain, fontWeight: '900', fontSize: 18, textAlign: 'center' },
+  gridFootnote: { color: colors.textMuted, textAlign: 'center', marginTop: 10, fontWeight: '700', fontSize: 12 },
 });

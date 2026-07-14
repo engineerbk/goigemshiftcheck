@@ -24,6 +24,32 @@ function elapsed(fromIso: string) {
   return `${h}h ${m}m`;
 }
 
+function shiftTitle(current: any, t: (key: any) => string) {
+  const start = current?.shift_start_time;
+  const end = current?.shift_end_time;
+  const type = current?.shift_type;
+  const name = type ? t(`shift_${type}` as any) : t('work_shift');
+  if (start && end) return `${name} ${start} - ${end}`;
+  return name;
+}
+
+function minutesPastShiftEnd(current: any, nowMs: number) {
+  const date = current?.check_in_local_date;
+  const end = current?.shift_end_time;
+  if (!date || !end) return null;
+  const endAt = new Date(`${date}T${end}:00`).getTime();
+  if (Number.isNaN(endAt)) return null;
+  const mins = Math.floor((nowMs - endAt) / 60000);
+  return mins > 0 ? mins : null;
+}
+
+function formatDuration(totalMinutes: number) {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h <= 0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+
 function localDate(d = new Date()) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -128,6 +154,7 @@ export default function Home() {
 
   const isIn = !!status?.checked_in;
   const current = status?.current;
+  const checkoutOverdueMinutes = isIn && current ? minutesPastShiftEnd(current, now) : null;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="home-screen">
@@ -162,8 +189,19 @@ export default function Home() {
               </View>
               {isIn && current ? (
                 <>
-                  <Text style={styles.bigTime} testID="elapsed-time">{elapsed(current.check_in)}</Text>
+                  <Text style={styles.activeShiftLine} testID="active-shift-info">{shiftTitle(current, t)}</Text>
+                  <Text style={styles.workedLine} testID="elapsed-time">
+                    {t('worked_for')}: <Text style={styles.workedValue}>{elapsed(current.check_in)}</Text>
+                  </Text>
                   <Text style={styles.heroSub}>{t('started_at')} {formatTime(current.check_in)}</Text>
+                  {checkoutOverdueMinutes ? (
+                    <View style={styles.checkoutOverdueBadge} testID="checkout-overdue-badge">
+                      <Ionicons name="warning" size={13} color={colors.warning} />
+                      <Text style={styles.checkoutOverdueText}>
+                        {t('checkout_overdue')} {formatDuration(checkoutOverdueMinutes)}
+                      </Text>
+                    </View>
+                  ) : null}
                   {current.late_minutes != null && current.late_minutes > 0 ? (
                     <View style={styles.lateBadge} testID="late-badge">
                       <Ionicons name="warning" size={12} color={colors.error} />
@@ -262,6 +300,9 @@ const styles = StyleSheet.create({
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   heroLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2, color: colors.textMuted },
   bigTime: { fontSize: 36, fontWeight: '800', color: colors.textMain, marginTop: 10, letterSpacing: -1 },
+  activeShiftLine: { fontSize: 20, fontWeight: '800', color: colors.textMain, marginTop: 12 },
+  workedLine: { color: colors.textMuted, marginTop: 6, fontSize: 15, fontWeight: '600' },
+  workedValue: { color: colors.textMain, fontWeight: '800' },
   heroSub: { color: colors.textMuted, marginTop: 4, fontSize: 14 },
   lateBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -277,6 +318,13 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   onTimeBadgeText: { color: colors.success, fontWeight: '700', fontSize: 12 },
+  checkoutOverdueBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#FEF3C7', borderRadius: 999,
+    paddingHorizontal: 10, paddingVertical: 5, alignSelf: 'flex-start',
+    marginTop: 10,
+  },
+  checkoutOverdueText: { color: '#92400E', fontWeight: '800', fontSize: 12 },
   ctaBtn: {
     marginTop: 20, paddingVertical: 18, borderRadius: 999,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
