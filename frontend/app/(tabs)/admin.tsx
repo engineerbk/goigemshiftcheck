@@ -18,7 +18,7 @@ function fmtDt(iso?: string | null) {
 
 export default function Admin() {
   const { t } = useLang();
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<any>(null);
   const [employees, setEmployees] = useState<any[]>([]);
@@ -53,6 +53,8 @@ export default function Admin() {
     try {
       await api.adminUpdateUserRole(target.id, role, store);
       await load();
+      if (target.id === user?.id) await refresh();
+      Alert.alert(t('saved'));
     } catch (e: any) {
       Alert.alert(t('failed'), e.message);
     }

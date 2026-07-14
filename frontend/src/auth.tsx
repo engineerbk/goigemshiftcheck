@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { AppState } from 'react-native';
 import { api, getToken, setToken, User } from './api';
 
 type AuthState = {
@@ -26,7 +27,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 30000);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refresh();
+    });
+    return () => {
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, [refresh]);
 
   const signIn = async (email: string, password: string) => {
     const res = await api.login(email, password);

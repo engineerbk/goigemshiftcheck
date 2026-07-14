@@ -1,15 +1,18 @@
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Image, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback } from 'react';
 import { useAuth } from '../../src/auth';
 import { useLang } from '../../src/i18n';
 import { colors } from '../../src/theme';
 
 export default function Profile() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, refresh } = useAuth();
   const { lang, setLang, t } = useLang();
   const router = useRouter();
+
+  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   const doSignOut = () => {
     const run = async () => {
