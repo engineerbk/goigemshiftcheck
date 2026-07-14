@@ -69,6 +69,8 @@ const translations: Record<Lang, Record<string, string>> = {
     shift_saved: 'Your shift has been saved.',
     failed: 'Failed',
     done: 'Done',
+    invalid_date_format: 'Use date format YYYY-MM-DD.',
+    invalid_time_format: 'Use time format HH:mm.',
 
     work_history: 'Work history',
     work_history_sub: 'Your check-ins and completed shifts.',
@@ -300,6 +302,8 @@ const translations: Record<Lang, Record<string, string>> = {
     shift_saved: 'Ca làm đã được lưu.',
     failed: 'Thất bại',
     done: 'Xong',
+    invalid_date_format: 'Nhập ngày theo định dạng YYYY-MM-DD.',
+    invalid_time_format: 'Nhập giờ theo định dạng HH:mm.',
 
     work_history: 'Lịch sử làm việc',
     work_history_sub: 'Các lần check-in và ca đã hoàn thành.',

@@ -37,6 +37,7 @@ export default function ShiftScreen() {
   const [mode, setMode] = useState<Mode>(null);
   // Buffer used by the popup picker to avoid mutating the field until "Done"
   const [tempValue, setTempValue] = useState<Date>(today);
+  const [tempText, setTempText] = useState('');
   const [saving, setSaving] = useState(false);
   const [shifts, setShifts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +53,9 @@ export default function ShiftScreen() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const openPicker = (m: Exclude<Mode, null>) => {
-    setTempValue(m === 'date' ? date : m === 'start' ? start : end);
+    const value = m === 'date' ? date : m === 'start' ? start : end;
+    setTempValue(value);
+    setTempText(m === 'date' ? fmtDate(value) : fmtTime(value));
     setMode(m);
   };
 
@@ -71,6 +74,36 @@ export default function ShiftScreen() {
   };
 
   const confirmPicker = () => {
+    if (Platform.OS === 'web') {
+      if (mode === 'date') {
+        const match = tempText.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) {
+          Alert.alert(t('failed'), t('invalid_date_format'));
+          return;
+        }
+        const next = new Date(date);
+        next.setFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        next.setHours(0, 0, 0, 0);
+        if (Number.isNaN(next.getTime()) || fmtDate(next) !== tempText.trim()) {
+          Alert.alert(t('failed'), t('invalid_date_format'));
+          return;
+        }
+        setDate(next);
+      }
+      if (mode === 'start' || mode === 'end') {
+        const match = tempText.trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+        if (!match) {
+          Alert.alert(t('failed'), t('invalid_time_format'));
+          return;
+        }
+        const next = new Date(mode === 'start' ? start : end);
+        next.setHours(Number(match[1]), Number(match[2]), 0, 0);
+        if (mode === 'start') setStart(next);
+        if (mode === 'end') setEnd(next);
+      }
+      setMode(null);
+      return;
+    }
     if (mode === 'date') setDate(tempValue);
     if (mode === 'start') setStart(tempValue);
     if (mode === 'end') setEnd(tempValue);
@@ -255,8 +288,44 @@ export default function ShiftScreen() {
           ))
         )}
 
-        {/* iOS: popup bottom-sheet picker; Android: native dialog */}
-        {Platform.OS === 'ios' ? (
+        {/* Web: text modal; iOS: popup bottom-sheet picker; Android: native dialog */}
+        {Platform.OS === 'web' ? (
+          <Modal
+            visible={mode !== null}
+            animationType="fade"
+            transparent
+            onRequestClose={cancelPicker}
+            testID="datetime-picker-modal"
+          >
+            <TouchableOpacity activeOpacity={1} style={styles.modalBg} onPress={cancelPicker}>
+              <TouchableOpacity activeOpacity={1} style={styles.modalSheet} onPress={() => {}}>
+                <View style={styles.pickerHeader}>
+                  <TouchableOpacity onPress={cancelPicker} testID="picker-cancel">
+                    <Text style={styles.pickerCancel}>{t('cancel')}</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.pickerTitle}>
+                    {mode === 'date' ? t('date') : mode === 'start' ? t('start_time') : t('end_time')}
+                  </Text>
+                  <TouchableOpacity onPress={confirmPicker} testID="picker-done">
+                    <Text style={styles.pickerDone}>{t('done')}</Text>
+                  </TouchableOpacity>
+                </View>
+                <TextInput
+                  testID="web-datetime-input"
+                  style={styles.webPickerInput}
+                  value={tempText}
+                  onChangeText={setTempText}
+                  placeholder={mode === 'date' ? 'YYYY-MM-DD' : 'HH:mm'}
+                  placeholderTextColor={colors.textLight}
+                  autoFocus
+                />
+                <Text style={styles.webPickerHint}>
+                  {mode === 'date' ? 'YYYY-MM-DD' : 'HH:mm'}
+                </Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+        ) : Platform.OS === 'ios' ? (
           <Modal
             visible={mode !== null}
             animationType="slide"
@@ -405,6 +474,12 @@ const styles = StyleSheet.create({
   pickerCancel: { fontSize: 15, color: colors.textMuted, fontWeight: '500', minWidth: 60 },
   pickerDone: { fontSize: 15, color: colors.primary, fontWeight: '700', minWidth: 60, textAlign: 'right' },
   iosPicker: { width: '100%', alignSelf: 'stretch' },
+  webPickerInput: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: 18,
+    fontWeight: '700', color: colors.textMain, backgroundColor: colors.surface,
+  },
+  webPickerHint: { color: colors.textMuted, fontSize: 12, marginTop: 8, fontWeight: '600' },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '70%' },
   modalHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 14 },
