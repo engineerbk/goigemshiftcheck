@@ -156,6 +156,7 @@ export const api = {
   adminRejectTaskProposal: (id: string, body: any = {}) =>
     request(`/admin/task-proposals/${id}/reject`, { method: 'POST', body: JSON.stringify(body) }),
   myTasks: () => request('/tasks/mine'),
+  taskDetail: (id: string) => request(`/tasks/${id}`),
   completeTask: (id: string) => request(`/tasks/${id}/complete`, { method: 'POST' }),
   proposeTaskChange: (id: string, body: { proposal_type: 'cancel' | 'change'; reason?: string; proposed_title?: string; proposed_description?: string; proposed_assigned_user_id?: string | null }) =>
     request(`/tasks/${id}/proposals`, { method: 'POST', body: JSON.stringify(body) }),

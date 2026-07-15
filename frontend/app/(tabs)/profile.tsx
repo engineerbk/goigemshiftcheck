@@ -189,13 +189,17 @@ export default function Profile() {
             tasks.slice(0, 20).map((task) => (
               <View key={task.id} style={styles.taskRow} testID={`my-task-${task.id}`}>
                 <View style={[styles.taskDot, { backgroundColor: task.status === 'completed' ? colors.success : colors.warning }]} />
-                <View style={{ flex: 1 }}>
+                <TouchableOpacity
+                  style={{ flex: 1 }}
+                  onPress={() => router.push({ pathname: '/task/[id]', params: { id: task.id } })}
+                  testID={`open-task-detail-${task.id}`}
+                >
                   <Text style={styles.taskName}>{task.title}</Text>
                   {task.description ? <Text style={styles.taskDesc} numberOfLines={2}>{task.description}</Text> : null}
                   <Text style={styles.taskMeta}>
                     {task.store_location || '—'} • giao bởi {task.created_by_name || 'Quản lý'} • {task.status === 'completed' ? 'đã hoàn thành' : 'đang mở'}
                   </Text>
-                </View>
+                </TouchableOpacity>
                 {task.status !== 'completed' ? (
                   <View style={styles.taskActions}>
                     <TouchableOpacity

@@ -1437,6 +1437,20 @@ async def my_tasks(user: dict = Depends(get_current_user)):
     return items
 
 
+@api_router.get("/tasks/{task_id}")
+async def task_detail(task_id: str, user: dict = Depends(get_current_user)):
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not task_is_visible_to_user(task, user):
+        raise HTTPException(status_code=403, detail="Not allowed to view this task")
+    proposals = await db.task_proposals.find(
+        {"task_id": task_id},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(100)
+    return {"task": task, "proposals": proposals}
+
+
 @api_router.post("/tasks/{task_id}/complete")
 async def complete_task(task_id: str, user: dict = Depends(get_current_user)):
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '../../src/auth';
 import { useLang } from '../../src/i18n';
 import { api } from '../../src/api';
@@ -63,6 +63,7 @@ function localTime(d = new Date()) {
 export default function Home() {
   const { user } = useAuth();
   const { t } = useLang();
+  const router = useRouter();
   const [status, setStatus] = useState<{ checked_in: boolean; current: any } | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
@@ -217,14 +218,18 @@ export default function Home() {
               openTasks.slice(0, 30).map((task) => (
                 <View key={task.id} style={styles.taskRow} testID={`home-open-task-${task.id}`}>
                   <View style={[styles.taskDot, { backgroundColor: colors.warning }]} />
-                  <View style={{ flex: 1 }}>
+                  <TouchableOpacity
+                    style={{ flex: 1 }}
+                    onPress={() => router.push({ pathname: '/task/[id]', params: { id: task.id } })}
+                    testID={`home-open-task-detail-${task.id}`}
+                  >
                     <Text style={styles.taskName}>{task.title}</Text>
                     {task.description ? <Text style={styles.taskDesc} numberOfLines={2}>{task.description}</Text> : null}
                     <Text style={styles.taskMeta}>
                       {task.store_location || '—'} • giao cho {task.assigned_user_name || task.assigned_user_email || 'quản lý cửa hàng'}
                     </Text>
                     <Text style={styles.taskMeta}>Giao bởi {task.created_by_name || '—'}</Text>
-                  </View>
+                  </TouchableOpacity>
                   <View style={styles.statusBadgeOpen}>
                     <Text style={styles.statusBadgeOpenText}>Mở</Text>
                   </View>
@@ -236,14 +241,18 @@ export default function Home() {
             {tasks.slice(0, 12).map((task) => (
               <View key={`recent-${task.id}`} style={styles.taskRow}>
                 <View style={[styles.taskDot, { backgroundColor: task.status === 'completed' ? colors.success : task.status === 'cancelled' ? colors.error : colors.warning }]} />
-                <View style={{ flex: 1 }}>
+                <TouchableOpacity
+                  style={{ flex: 1 }}
+                  onPress={() => router.push({ pathname: '/task/[id]', params: { id: task.id } })}
+                  testID={`home-recent-task-detail-${task.id}`}
+                >
                   <Text style={styles.taskName}>{task.title}</Text>
                   <Text style={styles.taskMeta}>
                     {task.store_location || '—'} • {task.assigned_user_name || task.assigned_user_email || 'task cửa hàng'} • {task.status}
                   </Text>
                   {task.completed_by_name ? <Text style={styles.taskMeta}>Hoàn thành bởi {task.completed_by_name}</Text> : null}
                   {task.last_review_comment ? <Text style={styles.reviewComment} numberOfLines={2}>“{task.last_review_comment}”</Text> : null}
-                </View>
+                </TouchableOpacity>
               </View>
             ))}
           </View>

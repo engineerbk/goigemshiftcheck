@@ -580,7 +580,11 @@ export default function Admin() {
               {tasks.slice(0, 30).map((task) => (
                 <View key={task.id} style={styles.toolRow}>
                   <View style={[styles.dot, { backgroundColor: task.status === 'completed' ? colors.success : colors.warning }]} />
-                  <View style={{ flex: 1 }}>
+                  <TouchableOpacity
+                    style={{ flex: 1 }}
+                    onPress={() => router.push({ pathname: '/task/[id]', params: { id: task.id } })}
+                    testID={`admin-open-task-detail-${task.id}`}
+                  >
                     <View style={styles.taskTitleRow}>
                       <Text style={styles.rowTitle}>{task.title}</Text>
                       <View style={[styles.statusPill, task.status === 'completed' ? styles.statusPillDone : styles.statusPillOpen]}>
@@ -596,7 +600,7 @@ export default function Admin() {
                     <Text style={styles.taskAudit}>
                       Giao bởi {task.created_by_name || '—'}{task.completed_by_name ? ` • hoàn thành bởi ${task.completed_by_name}` : ''}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                   <View style={styles.rowActions}>
                     {task.status !== 'completed' ? <IconAction icon="checkmark-done" label={t('completed')} onPress={() => quickAction(() => api.completeTask(task.id))} /> : null}
                     {canDeleteTask(task) ? <IconAction icon="trash-outline" label={t('delete')} danger onPress={() => quickAction(() => api.adminDeleteTask(task.id))} /> : null}

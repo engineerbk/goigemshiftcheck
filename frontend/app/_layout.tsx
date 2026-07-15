@@ -18,6 +18,7 @@ export default function RootLayout() {
               <Stack.Screen name="register" />
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="employee-report/[userId]" />
+              <Stack.Screen name="task/[id]" />
               <Stack.Screen name="shift-edit/[id]" />
               <Stack.Screen name="swap/[targetId]" />
               <Stack.Screen name="notifications" />

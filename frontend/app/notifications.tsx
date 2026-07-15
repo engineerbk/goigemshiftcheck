@@ -65,6 +65,8 @@ export default function NotificationsScreen() {
       router.push('/(tabs)/calendar');
     } else if (n.type?.startsWith('shift_')) {
       router.push('/(tabs)/calendar');
+    } else if (n.data?.task_id) {
+      router.push({ pathname: '/task/[id]', params: { id: n.data.task_id } });
     }
   };
 
