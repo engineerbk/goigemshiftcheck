@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TouchableOpacity, Alert, Modal, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,6 +64,7 @@ export default function Admin() {
   const [attendance, setAttendance] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
+  const [taskProposals, setTaskProposals] = useState<any[]>([]);
   const [pendingSwaps, setPendingSwaps] = useState<number>(0);
   const [pendingShifts, setPendingShifts] = useState<number>(0);
   const [loading, setLoading] = useState(true);
@@ -98,10 +99,10 @@ export default function Admin() {
 
   const load = useCallback(async () => {
     try {
-      const [s, e, a, sh, sw, ps, tk] = await Promise.all([
-        api.adminStats(), api.adminEmployees(), api.adminAttendance(), api.adminShifts(), api.adminListSwaps(), api.adminPendingShifts(), api.adminTasks(),
+      const [s, e, a, sh, sw, ps, tk, tp] = await Promise.all([
+        api.adminStats(), api.adminEmployees(), api.adminAttendance(), api.adminShifts(), api.adminListSwaps(), api.adminPendingShifts(), api.adminTasks(), api.adminTaskProposals(),
       ]);
-      setStats(s); setEmployees(e); setAttendance(a); setShifts(sh); setTasks(tk || []);
+      setStats(s); setEmployees(e); setAttendance(a); setShifts(sh); setTasks(tk || []); setTaskProposals(tp || []);
       setPendingSwaps((sw || []).filter((x: any) => x.status === 'pending').length);
       setPendingShifts((ps || []).length);
       if (!attendanceUserId && e?.[0]?.id) setAttendanceUserId(e[0].id);
@@ -119,7 +120,25 @@ export default function Admin() {
   const isOwner = user?.role === 'owner' || user?.role === 'admin';
   const selectableStores = isOwner ? STORE_LOCATIONS : [defaultStore];
   const employeeOptions = employees.filter((e) => e.role !== 'admin' && e.role !== 'owner');
-  const taskEmployeeOptions = employeeOptions.filter((e) => !taskStore || !e.store_location || e.store_location === taskStore || shifts.some((s) => s.user_id === e.id && s.store_location === taskStore));
+  const approvedShiftUserIdsForTaskStore = new Set(
+    shifts
+      .filter((s) => s.store_location === taskStore && s.approval_status === 'approved')
+      .map((s) => s.user_id)
+  );
+  const taskEmployeeOptions = employeeOptions.filter((e) => approvedShiftUserIdsForTaskStore.has(e.id));
+  const openTasks = tasks.filter((task) => task.status !== 'completed');
+  const completedTasks = tasks.filter((task) => task.status === 'completed');
+  const pendingTaskProposals = taskProposals.filter((proposal) => proposal.status === 'pending');
+
+  useEffect(() => {
+    if (taskEmployeeOptions.length === 0) {
+      if (taskUserId) setTaskUserId('');
+      return;
+    }
+    if (!taskUserId || !taskEmployeeOptions.some((employee) => employee.id === taskUserId)) {
+      setTaskUserId(taskEmployeeOptions[0].id);
+    }
+  }, [taskEmployeeOptions, taskUserId]);
 
   const updateRole = async (target: any, role: 'employee' | 'manager' | 'owner', storeLocation = '') => {
     const store = role === 'manager' ? storeLocation : '';
@@ -275,6 +294,22 @@ export default function Admin() {
     } finally {
       setActionSaving(false);
     }
+  };
+
+  const canDeleteTask = (task: any) => isOwner || task.created_by === user?.id;
+
+  const approveTaskProposal = (proposal: any) => {
+    Alert.alert('Duyệt đề xuất?', proposal.proposal_type === 'cancel' ? 'Task sẽ được huỷ.' : 'Task sẽ được cập nhật theo đề xuất.', [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('approve'), onPress: () => quickAction(() => api.adminApproveTaskProposal(proposal.id)) },
+    ]);
+  };
+
+  const rejectTaskProposal = (proposal: any) => {
+    Alert.alert('Giữ nguyên task?', 'Đề xuất sẽ bị từ chối và task được giao giữ nguyên.', [
+      { text: t('cancel'), style: 'cancel' },
+      { text: 'Giữ nguyên', style: 'destructive', onPress: () => quickAction(() => api.adminRejectTaskProposal(proposal.id, 'Giữ nguyên task được giao')) },
+    ]);
   };
 
   if (loading) {
@@ -484,17 +519,64 @@ export default function Admin() {
                 {actionSaving ? <ActivityIndicator color={colors.primaryFg} /> : <Text style={styles.primaryBtnText}>Tạo task</Text>}
               </TouchableOpacity>
 
-              <Text style={styles.listTitle}>Task gần nhất</Text>
-              {tasks.slice(0, 6).map((task) => (
+              {pendingTaskProposals.length > 0 ? (
+                <>
+                  <Text style={styles.listTitle}>Đề xuất task chờ duyệt</Text>
+                  {pendingTaskProposals.map((proposal) => (
+                    <View key={proposal.id} style={styles.proposalCard} testID={`task-proposal-${proposal.id}`}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rowTitle}>{proposal.task_title}</Text>
+                        <Text style={styles.rowSub}>
+                          {proposal.proposal_type === 'cancel' ? 'Đề xuất huỷ' : 'Đề xuất thay đổi'} • bởi {proposal.requested_by_name || proposal.requested_by_email}
+                        </Text>
+                        {proposal.reason ? <Text style={styles.proposalReason}>Lý do: {proposal.reason}</Text> : null}
+                        {proposal.proposed_title ? <Text style={styles.proposalReason}>Tên mới: {proposal.proposed_title}</Text> : null}
+                        {proposal.proposed_description ? <Text style={styles.proposalReason}>Mô tả mới: {proposal.proposed_description}</Text> : null}
+                      </View>
+                      <View style={styles.rowActions}>
+                        <IconAction icon="checkmark" label={t('approve')} onPress={() => approveTaskProposal(proposal)} />
+                        <IconAction icon="close" label="Giữ nguyên" danger onPress={() => rejectTaskProposal(proposal)} />
+                      </View>
+                    </View>
+                  ))}
+                </>
+              ) : null}
+
+              <View style={styles.taskSummaryRow}>
+                <View style={styles.taskSummaryBox}>
+                  <Text style={styles.taskSummaryValue}>{openTasks.length}</Text>
+                  <Text style={styles.taskSummaryLabel}>Đang mở</Text>
+                </View>
+                <View style={styles.taskSummaryBox}>
+                  <Text style={styles.taskSummaryValue}>{completedTasks.length}</Text>
+                  <Text style={styles.taskSummaryLabel}>Hoàn thành</Text>
+                </View>
+              </View>
+
+              <Text style={styles.listTitle}>Task đã giao</Text>
+              {tasks.slice(0, 30).map((task) => (
                 <View key={task.id} style={styles.toolRow}>
                   <View style={[styles.dot, { backgroundColor: task.status === 'completed' ? colors.success : colors.warning }]} />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.rowTitle}>{task.title}</Text>
-                    <Text style={styles.rowSub}>{task.store_location} • {task.assigned_user_name || 'Task cửa hàng'} • {task.status}</Text>
+                    <View style={styles.taskTitleRow}>
+                      <Text style={styles.rowTitle}>{task.title}</Text>
+                      <View style={[styles.statusPill, task.status === 'completed' ? styles.statusPillDone : styles.statusPillOpen]}>
+                        <Text style={[styles.statusPillText, task.status === 'completed' ? styles.statusPillTextDone : styles.statusPillTextOpen]}>
+                          {task.status === 'completed' ? 'Xong' : 'Mở'}
+                        </Text>
+                      </View>
+                    </View>
+                    {task.description ? <Text style={styles.rowSub} numberOfLines={2}>{task.description}</Text> : null}
+                    <Text style={styles.rowSub}>
+                      {task.store_location} • giao cho {task.assigned_user_name || task.assigned_user_email || 'quản lý cửa hàng'}
+                    </Text>
+                    <Text style={styles.taskAudit}>
+                      Giao bởi {task.created_by_name || '—'}{task.completed_by_name ? ` • hoàn thành bởi ${task.completed_by_name}` : ''}
+                    </Text>
                   </View>
                   <View style={styles.rowActions}>
                     {task.status !== 'completed' ? <IconAction icon="checkmark-done" label={t('completed')} onPress={() => quickAction(() => api.completeTask(task.id))} /> : null}
-                    <IconAction icon="trash-outline" label={t('delete')} danger onPress={() => quickAction(() => api.adminDeleteTask(task.id))} />
+                    {canDeleteTask(task) ? <IconAction icon="trash-outline" label={t('delete')} danger onPress={() => quickAction(() => api.adminDeleteTask(task.id))} /> : null}
                   </View>
                 </View>
               ))}
@@ -859,6 +941,20 @@ const styles = StyleSheet.create({
   presetBtnActive: { backgroundColor: '#ECFDF5', borderColor: '#34D399' },
   presetText: { color: colors.textMuted, fontWeight: '800', fontSize: 11 },
   presetTextActive: { color: '#047857' },
+  taskSummaryRow: { flexDirection: 'row', gap: 8 },
+  taskSummaryBox: { flex: 1, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 12 },
+  taskSummaryValue: { color: colors.textMain, fontSize: 22, fontWeight: '900' },
+  taskSummaryLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '800', marginTop: 2 },
+  proposalCard: { flexDirection: 'row', gap: 10, borderRadius: 12, borderWidth: 1, borderColor: '#FCD34D', backgroundColor: '#FFFBEB', padding: 12 },
+  proposalReason: { color: '#92400E', fontSize: 12, fontWeight: '700', marginTop: 4, lineHeight: 17 },
+  taskTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  statusPill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
+  statusPillOpen: { backgroundColor: '#FFFBEB', borderColor: '#FCD34D' },
+  statusPillDone: { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' },
+  statusPillText: { fontSize: 10, fontWeight: '900' },
+  statusPillTextOpen: { color: '#92400E' },
+  statusPillTextDone: { color: '#047857' },
+  taskAudit: { color: colors.textLight, fontSize: 11, fontWeight: '800', marginTop: 4 },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.background,
     padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 10,

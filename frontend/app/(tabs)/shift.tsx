@@ -19,6 +19,12 @@ function fmtDate(d: Date) {
 function fmtTime(d: Date) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
+function dateWithTime(base: Date, hhmm: string) {
+  const [h, m] = hhmm.split(':').map(n => parseInt(n, 10));
+  const d = new Date(base);
+  d.setHours(h || 0, m || 0, 0, 0);
+  return d;
+}
 
 type Mode = 'date' | 'start' | 'end' | null;
 
@@ -26,13 +32,13 @@ export default function ShiftScreen() {
   const { t } = useLang();
   const router = useRouter();
   const today = new Date();
-  const in8 = new Date(today.getTime() + 8 * 3600 * 1000);
+  const defaultPreset = SHIFT_PRESETS.find(p => p.type === 'morning') || SHIFT_PRESETS[0];
   const [date, setDate] = useState<Date>(today);
-  const [start, setStart] = useState<Date>(today);
-  const [end, setEnd] = useState<Date>(in8);
+  const [start, setStart] = useState<Date>(() => dateWithTime(today, defaultPreset.start));
+  const [end, setEnd] = useState<Date>(() => dateWithTime(today, defaultPreset.end));
   const [note, setNote] = useState('');
   const [storeLocation, setStoreLocation] = useState<string>('');
-  const [shiftType, setShiftType] = useState<'morning' | 'afternoon' | 'evening' | ''>('');
+  const [shiftType, setShiftType] = useState<'morning' | 'afternoon' | 'evening' | ''>('morning');
   const [picker, setPicker] = useState<null | 'store' | 'shiftType'>(null);
   const [mode, setMode] = useState<Mode>(null);
   // Buffer used by the popup picker to avoid mutating the field until "Done"
@@ -164,6 +170,19 @@ export default function ShiftScreen() {
 
           <View style={styles.divider} />
 
+          <TouchableOpacity style={styles.field} onPress={() => setPicker('shiftType')} testID="shift-type">
+            <Ionicons name="time" size={20} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>{t('work_shift')}</Text>
+              <Text style={styles.fieldValue}>
+                {shiftType ? t(`shift_${shiftType}` as any) : t('shift_custom')}
+              </Text>
+            </View>
+            <Ionicons name="chevron-down" size={20} color={colors.textLight} />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
           <TouchableOpacity style={styles.field} onPress={() => openPicker('start')} testID="shift-start">
             <Ionicons name="play-circle" size={20} color={colors.primary} />
             <View style={{ flex: 1 }}>
@@ -182,19 +201,6 @@ export default function ShiftScreen() {
               <Text style={styles.fieldValue}>{fmtTime(end)}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.textLight} />
-          </TouchableOpacity>
-
-          <View style={styles.divider} />
-
-          <TouchableOpacity style={styles.field} onPress={() => setPicker('shiftType')} testID="shift-type">
-            <Ionicons name="time" size={20} color={colors.primary} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.fieldLabel}>{t('work_shift')}</Text>
-              <Text style={styles.fieldValue}>
-                {shiftType ? t(`shift_${shiftType}` as any) : t('shift_custom')}
-              </Text>
-            </View>
-            <Ionicons name="chevron-down" size={20} color={colors.textLight} />
           </TouchableOpacity>
 
           <View style={styles.divider} />

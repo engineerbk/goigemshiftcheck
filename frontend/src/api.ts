@@ -150,8 +150,14 @@ export const api = {
     request(`/admin/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   adminDeleteTask: (id: string) =>
     request(`/admin/tasks/${id}`, { method: 'DELETE' }),
+  adminTaskProposals: () => request('/admin/task-proposals'),
+  adminApproveTaskProposal: (id: string) => request(`/admin/task-proposals/${id}/approve`, { method: 'POST' }),
+  adminRejectTaskProposal: (id: string, reason = '') =>
+    request(`/admin/task-proposals/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   myTasks: () => request('/tasks/mine'),
   completeTask: (id: string) => request(`/tasks/${id}/complete`, { method: 'POST' }),
+  proposeTaskChange: (id: string, body: { proposal_type: 'cancel' | 'change'; reason?: string; proposed_title?: string; proposed_description?: string; proposed_assigned_user_id?: string | null }) =>
+    request(`/tasks/${id}/proposals`, { method: 'POST', body: JSON.stringify(body) }),
 
   // notifications
   listNotifications: () => request('/notifications'),
