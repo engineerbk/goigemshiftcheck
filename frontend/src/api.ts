@@ -151,9 +151,10 @@ export const api = {
   adminDeleteTask: (id: string) =>
     request(`/admin/tasks/${id}`, { method: 'DELETE' }),
   adminTaskProposals: () => request('/admin/task-proposals'),
-  adminApproveTaskProposal: (id: string) => request(`/admin/task-proposals/${id}/approve`, { method: 'POST' }),
-  adminRejectTaskProposal: (id: string, reason = '') =>
-    request(`/admin/task-proposals/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  adminApproveTaskProposal: (id: string, body: any = {}) =>
+    request(`/admin/task-proposals/${id}/approve`, { method: 'POST', body: JSON.stringify(body) }),
+  adminRejectTaskProposal: (id: string, body: any = {}) =>
+    request(`/admin/task-proposals/${id}/reject`, { method: 'POST', body: JSON.stringify(body) }),
   myTasks: () => request('/tasks/mine'),
   completeTask: (id: string) => request(`/tasks/${id}/complete`, { method: 'POST' }),
   proposeTaskChange: (id: string, body: { proposal_type: 'cancel' | 'change'; reason?: string; proposed_title?: string; proposed_description?: string; proposed_assigned_user_id?: string | null }) =>

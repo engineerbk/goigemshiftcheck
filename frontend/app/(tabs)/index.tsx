@@ -68,6 +68,8 @@ export default function Home() {
   const [acting, setActing] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const isOwner = user?.role === 'owner' || user?.role === 'admin';
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
@@ -76,14 +78,20 @@ export default function Home() {
 
   const load = useCallback(async () => {
     try {
-      const s = await api.attendanceStatus();
-      setStatus(s);
+      if (isOwner) {
+        const items = await api.adminTasks();
+        setTasks(items || []);
+        setStatus(null);
+      } else {
+        const s = await api.attendanceStatus();
+        setStatus(s);
+      }
     } catch (e: any) {
       console.log('status error', e.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isOwner]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -155,6 +163,9 @@ export default function Home() {
   const isIn = !!status?.checked_in;
   const current = status?.current;
   const checkoutOverdueMinutes = isIn && current ? minutesPastShiftEnd(current, now) : null;
+  const openTasks = tasks.filter((task) => task.status === 'open');
+  const completedTasks = tasks.filter((task) => task.status === 'completed');
+  const cancelledTasks = tasks.filter((task) => task.status === 'cancelled');
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']} testID="home-screen">
@@ -180,6 +191,62 @@ export default function Home() {
 
         {loading ? (
           <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+        ) : isOwner ? (
+          <View testID="director-home-tasks">
+            <View style={styles.directorHero}>
+              <View style={styles.heroRow}>
+                <View style={[styles.statusDot, { backgroundColor: colors.primary }]} />
+                <Text style={styles.heroLabel}>TASK DASHBOARD</Text>
+              </View>
+              <Text style={styles.directorTitle}>Công việc đang giao</Text>
+              <Text style={styles.heroSub}>Theo dõi hiện trạng task của tất cả cửa hàng.</Text>
+            </View>
+
+            <View style={styles.taskStatsGrid}>
+              <TaskStat label="Đang mở" value={openTasks.length} color={colors.warning} />
+              <TaskStat label="Hoàn thành" value={completedTasks.length} color={colors.success} />
+              <TaskStat label="Đã huỷ" value={cancelledTasks.length} color={colors.error} />
+            </View>
+
+            <Text style={styles.taskSectionTitle}>Task đang mở</Text>
+            {openTasks.length === 0 ? (
+              <View style={styles.emptyTaskBox}>
+                <Text style={styles.emptyTaskText}>Không có task đang mở</Text>
+              </View>
+            ) : (
+              openTasks.slice(0, 30).map((task) => (
+                <View key={task.id} style={styles.taskRow} testID={`home-open-task-${task.id}`}>
+                  <View style={[styles.taskDot, { backgroundColor: colors.warning }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.taskName}>{task.title}</Text>
+                    {task.description ? <Text style={styles.taskDesc} numberOfLines={2}>{task.description}</Text> : null}
+                    <Text style={styles.taskMeta}>
+                      {task.store_location || '—'} • giao cho {task.assigned_user_name || task.assigned_user_email || 'quản lý cửa hàng'}
+                    </Text>
+                    <Text style={styles.taskMeta}>Giao bởi {task.created_by_name || '—'}</Text>
+                  </View>
+                  <View style={styles.statusBadgeOpen}>
+                    <Text style={styles.statusBadgeOpenText}>Mở</Text>
+                  </View>
+                </View>
+              ))
+            )}
+
+            <Text style={styles.taskSectionTitle}>Task gần đây</Text>
+            {tasks.slice(0, 12).map((task) => (
+              <View key={`recent-${task.id}`} style={styles.taskRow}>
+                <View style={[styles.taskDot, { backgroundColor: task.status === 'completed' ? colors.success : task.status === 'cancelled' ? colors.error : colors.warning }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.taskName}>{task.title}</Text>
+                  <Text style={styles.taskMeta}>
+                    {task.store_location || '—'} • {task.assigned_user_name || task.assigned_user_email || 'task cửa hàng'} • {task.status}
+                  </Text>
+                  {task.completed_by_name ? <Text style={styles.taskMeta}>Hoàn thành bởi {task.completed_by_name}</Text> : null}
+                  {task.last_review_comment ? <Text style={styles.reviewComment} numberOfLines={2}>“{task.last_review_comment}”</Text> : null}
+                </View>
+              </View>
+            ))}
+          </View>
         ) : (
           <>
             <View style={[styles.heroCard, isIn ? styles.heroCardActive : null]}>
@@ -276,6 +343,16 @@ export default function Home() {
   );
 }
 
+function TaskStat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <View style={styles.taskStatCard}>
+      <View style={[styles.taskStatDot, { backgroundColor: color }]} />
+      <Text style={styles.taskStatValue}>{value}</Text>
+      <Text style={styles.taskStatLabel}>{label}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   container: { padding: 20, paddingBottom: 40 },
@@ -348,4 +425,32 @@ const styles = StyleSheet.create({
   tipRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
   tipText: { flex: 1, color: colors.textMain, fontSize: 14 },
   tick: { textAlign: 'center', color: colors.textLight, marginTop: 20, fontSize: 12 },
+  directorHero: {
+    backgroundColor: colors.background, borderRadius: 20, padding: 20,
+    borderWidth: 1, borderColor: colors.border, marginBottom: 12,
+  },
+  directorTitle: { fontSize: 28, fontWeight: '900', color: colors.textMain, marginTop: 10 },
+  taskStatsGrid: { flexDirection: 'row', gap: 10, marginBottom: 18 },
+  taskStatCard: {
+    flex: 1, backgroundColor: colors.background, borderRadius: 14,
+    borderWidth: 1, borderColor: colors.border, padding: 12,
+  },
+  taskStatDot: { width: 9, height: 9, borderRadius: 5, marginBottom: 8 },
+  taskStatValue: { color: colors.textMain, fontSize: 24, fontWeight: '900' },
+  taskStatLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '800', marginTop: 2 },
+  taskSectionTitle: { color: colors.textMain, fontSize: 17, fontWeight: '900', marginTop: 10, marginBottom: 10 },
+  taskRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: colors.background, borderRadius: 14,
+    borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10,
+  },
+  taskDot: { width: 9, height: 9, borderRadius: 5 },
+  taskName: { color: colors.textMain, fontSize: 14, fontWeight: '900' },
+  taskDesc: { color: colors.textMuted, fontSize: 12, marginTop: 3, lineHeight: 17 },
+  taskMeta: { color: colors.textLight, fontSize: 11, fontWeight: '700', marginTop: 4 },
+  statusBadgeOpen: { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FCD34D', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  statusBadgeOpenText: { color: '#92400E', fontSize: 10, fontWeight: '900' },
+  emptyTaskBox: { backgroundColor: colors.background, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 18, alignItems: 'center', marginBottom: 10 },
+  emptyTaskText: { color: colors.textMuted, fontWeight: '700' },
+  reviewComment: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 4 },
 });

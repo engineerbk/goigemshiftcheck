@@ -96,6 +96,12 @@ export default function Admin() {
   const [taskStore, setTaskStore] = useState(defaultStore);
   const [taskUserId, setTaskUserId] = useState('');
   const [actionSaving, setActionSaving] = useState(false);
+  const [reviewProposal, setReviewProposal] = useState<any>(null);
+  const [reviewMode, setReviewMode] = useState<'approve' | 'reject'>('approve');
+  const [reviewComment, setReviewComment] = useState('');
+  const [reviewTitle, setReviewTitle] = useState('');
+  const [reviewDescription, setReviewDescription] = useState('');
+  const [reviewAssignedUserId, setReviewAssignedUserId] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -298,18 +304,35 @@ export default function Admin() {
 
   const canDeleteTask = (task: any) => isOwner || task.created_by === user?.id;
 
-  const approveTaskProposal = (proposal: any) => {
-    Alert.alert('Duyệt đề xuất?', proposal.proposal_type === 'cancel' ? 'Task sẽ được huỷ.' : 'Task sẽ được cập nhật theo đề xuất.', [
-      { text: t('cancel'), style: 'cancel' },
-      { text: t('approve'), onPress: () => quickAction(() => api.adminApproveTaskProposal(proposal.id)) },
-    ]);
+  const openProposalReview = (proposal: any, mode: 'approve' | 'reject') => {
+    const task = tasks.find((item) => item.id === proposal.task_id);
+    setReviewProposal(proposal);
+    setReviewMode(mode);
+    setReviewComment('');
+    setReviewTitle(mode === 'approve' && proposal.proposed_title ? proposal.proposed_title : task?.title || proposal.task_title || '');
+    setReviewDescription(mode === 'approve' && proposal.proposed_description != null ? proposal.proposed_description : task?.description || '');
+    setReviewAssignedUserId(mode === 'approve' && proposal.proposed_assigned_user_id ? proposal.proposed_assigned_user_id : task?.assigned_user_id || '');
   };
 
-  const rejectTaskProposal = (proposal: any) => {
-    Alert.alert('Giữ nguyên task?', 'Đề xuất sẽ bị từ chối và task được giao giữ nguyên.', [
-      { text: t('cancel'), style: 'cancel' },
-      { text: 'Giữ nguyên', style: 'destructive', onPress: () => quickAction(() => api.adminRejectTaskProposal(proposal.id, 'Giữ nguyên task được giao')) },
-    ]);
+  const submitProposalReview = async () => {
+    if (!reviewProposal) return;
+    const body = {
+      comment: reviewComment,
+      title: reviewTitle,
+      description: reviewDescription,
+      assigned_user_id: reviewAssignedUserId || null,
+    };
+    setActionSaving(true);
+    try {
+      if (reviewMode === 'approve') await api.adminApproveTaskProposal(reviewProposal.id, body);
+      else await api.adminRejectTaskProposal(reviewProposal.id, body);
+      setReviewProposal(null);
+      await load();
+    } catch (e: any) {
+      Alert.alert(t('failed'), e.message);
+    } finally {
+      setActionSaving(false);
+    }
   };
 
   if (loading) {
@@ -534,8 +557,8 @@ export default function Admin() {
                         {proposal.proposed_description ? <Text style={styles.proposalReason}>Mô tả mới: {proposal.proposed_description}</Text> : null}
                       </View>
                       <View style={styles.rowActions}>
-                        <IconAction icon="checkmark" label={t('approve')} onPress={() => approveTaskProposal(proposal)} />
-                        <IconAction icon="close" label="Giữ nguyên" danger onPress={() => rejectTaskProposal(proposal)} />
+                        <IconAction icon="checkmark" label={t('approve')} onPress={() => openProposalReview(proposal, 'approve')} />
+                        <IconAction icon="close" label="Giữ nguyên" danger onPress={() => openProposalReview(proposal, 'reject')} />
                       </View>
                     </View>
                   ))}
@@ -645,6 +668,67 @@ export default function Admin() {
         ))}
         {shifts.length === 0 && <EmptyBox text={t('no_shifts_registered')} />}
       </ScrollView>
+      <Modal visible={!!reviewProposal} animationType="slide" transparent onRequestClose={() => setReviewProposal(null)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{reviewMode === 'approve' ? 'Duyệt đề xuất' : 'Giữ nguyên task'}</Text>
+            <Text style={styles.modalSub}>{reviewProposal?.task_title}</Text>
+            <Text style={styles.fieldCaption}>
+              {reviewMode === 'approve'
+                ? (reviewProposal?.proposal_type === 'cancel' ? 'Task sẽ được hủy kèm bình luận.' : 'Task sẽ được cập nhật theo nội dung bên dưới.')
+                : 'Đề xuất bị từ chối; task được giao lại với bình luận và chỉnh sửa nếu có.'}
+            </Text>
+            <TextInput
+              style={[styles.formInput, styles.textArea]}
+              value={reviewComment}
+              onChangeText={setReviewComment}
+              placeholder="Bình luận cho người nhận"
+              placeholderTextColor={colors.textLight}
+              multiline
+            />
+            {!(reviewMode === 'approve' && reviewProposal?.proposal_type === 'cancel') ? (
+              <>
+                <TextInput
+                  style={styles.formInput}
+                  value={reviewTitle}
+                  onChangeText={setReviewTitle}
+                  placeholder="Tên task"
+                  placeholderTextColor={colors.textLight}
+                />
+                <TextInput
+                  style={[styles.formInput, styles.textArea]}
+                  value={reviewDescription}
+                  onChangeText={setReviewDescription}
+                  placeholder="Mô tả / yêu cầu"
+                  placeholderTextColor={colors.textLight}
+                  multiline
+                />
+                <Text style={styles.fieldCaption}>Giao lại cho</Text>
+                <PersonPicker
+                  value={reviewAssignedUserId}
+                  onChange={setReviewAssignedUserId}
+                  people={employeeOptions.filter((employee) => shifts.some((shift) => (
+                    shift.user_id === employee.id &&
+                    shift.store_location === (reviewProposal?.store_location || taskStore) &&
+                    shift.approval_status === 'approved'
+                  )))}
+                  allowEmpty={isOwner}
+                  emptyLabel="Task cho cửa hàng"
+                />
+              </>
+            ) : null}
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setReviewProposal(null)} disabled={actionSaving}>
+                <Text style={styles.modalCancelText}>{t('cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalSaveBtn, actionSaving && styles.modalSaveBtnDisabled]} onPress={submitProposalReview} disabled={actionSaving}>
+                {actionSaving ? <ActivityIndicator color={colors.primaryFg} /> : <Text style={styles.modalSaveText}>{reviewMode === 'approve' ? t('approve') : 'Giữ nguyên'}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <Modal visible={!!roleTarget} animationType="slide" transparent onRequestClose={closeRoleEditor}>
         <View style={styles.modalBg}>
           <View style={styles.modalSheet}>

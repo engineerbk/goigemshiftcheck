@@ -48,6 +48,7 @@ export default function TabsLayout() {
         name="shift"
         options={{
           title: t('tab_shifts'),
+          href: isOwner ? null : '/(tabs)/shift',
           tabBarIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
         }}
       />

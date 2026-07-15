@@ -269,11 +269,12 @@ export default function Calendar() {
           {days.map((d) => {
             const dStr = fmtDate(d);
             const active = selectedDate === dStr;
+            const isToday = fmtDate(new Date()) === dStr;
             return (
               <TouchableOpacity
                 key={dStr}
                 testID={`cal-day-${dStr}`}
-                style={[styles.dayTab, active && styles.dayTabActive]}
+                style={[styles.dayTab, isToday && !active && styles.dayTabToday, active && styles.dayTabActive]}
                 onPress={() => setSelectedDate(dStr)}
               >
                 <Text style={[styles.dayTabName, active && styles.dayTabTextActive]}>
@@ -313,81 +314,99 @@ export default function Calendar() {
           <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
         ) : (
           <View style={styles.roster}>
-            <View style={styles.gridHeader}>
-              <View style={styles.storeHeaderSpacer} />
-              {SHIFT_PRESETS.map((preset) => {
-                const active = selectedShiftType === preset.type;
-                return (
-                  <TouchableOpacity
-                    key={preset.type}
-                    style={[styles.shiftHeader, active && styles.shiftHeaderActive]}
-                    onPress={() => setSelectedShiftType(preset.type)}
-                    testID={`cal-shift-type-${preset.type}`}
-                  >
-                    <Text style={[styles.shiftHeaderText, active && styles.shiftHeaderTextActive]}>
-                      {t(`shift_${preset.type}` as any)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {STORE_LOCATIONS.map((store) => {
-              const meta = STORE_META[store] || { code: store.slice(0, 3).toUpperCase(), capacity: 2 };
-              const selectedCount = selectedDayShifts.filter(s => {
-                const preset = SHIFT_PRESETS.find(p => p.type === selectedShiftType);
-                return s.store_location === store && preset && matchesPreset(s, preset);
-              }).length;
-              const state = staffingState(selectedCount, meta.capacity);
-              return (
-                <View key={store} style={styles.gridRow}>
-                  <View style={styles.storeCell}>
-                    <Text style={[styles.storeCode, { color: statusColor(state) }]}>{meta.code}</Text>
-                    <Text style={styles.storeName} numberOfLines={1}>{shortStoreName(store)}</Text>
-                    <View style={styles.storeCountRow}>
-                      <View style={[styles.storeStatusDot, { backgroundColor: statusColor(state) }]} />
-                      <Text style={[styles.storeCount, { color: statusColor(state) }]}>
-                        {selectedCount}/{meta.capacity}
-                      </Text>
-                    </View>
-                  </View>
-
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.rosterScroller}
+            >
+              <View style={styles.rosterTable}>
+                <View style={styles.gridHeader}>
+                  <View style={styles.storeHeaderSpacer} />
                   {SHIFT_PRESETS.map((preset) => {
-                    const activeColumn = selectedShiftType === preset.type;
-                    const cellShifts = selectedDayShifts.filter(s => s.store_location === store && matchesPreset(s, preset));
+                    const active = selectedShiftType === preset.type;
                     return (
                       <TouchableOpacity
-                        key={`${store}-${preset.type}`}
-                        style={[styles.rosterCell, activeColumn && styles.rosterCellActive]}
-                        onPress={() => onCellPress(cellShifts)}
-                        disabled={cellShifts.length === 0}
-                        testID={`cal-cell-${store}-${preset.type}`}
+                        key={preset.type}
+                        style={[styles.shiftHeader, active && styles.shiftHeaderActive]}
+                        onPress={() => setSelectedShiftType(preset.type)}
+                        testID={`cal-shift-type-${preset.type}`}
                       >
-                        {cellShifts.length === 0 ? (
-                          activeColumn && store === 'Kho Tổng 22-89C' ? <Text style={styles.offText}>OFF</Text> : null
-                        ) : (
-                          cellShifts.slice(0, 3).map((s) => {
-                            const mine = s.user_id === user?.id;
-                            return (
-                              <Text
-                                key={s.id}
-                                style={[styles.staffName, activeColumn && styles.staffNameActive, mine && styles.staffNameMine]}
-                                numberOfLines={1}
-                              >
-                                {s.user_name || s.user_email}
-                              </Text>
-                            );
-                          })
-                        )}
-                        {cellShifts.length > 3 ? (
-                          <Text style={[styles.moreText, activeColumn && styles.moreTextActive]}>+{cellShifts.length - 3}</Text>
-                        ) : null}
+                        <Text style={[styles.shiftHeaderText, active && styles.shiftHeaderTextActive]}>
+                          {t(`shift_${preset.type}` as any)}
+                        </Text>
                       </TouchableOpacity>
                     );
                   })}
                 </View>
-              );
-            })}
+
+                {STORE_LOCATIONS.map((store) => {
+                  const meta = STORE_META[store] || { code: store.slice(0, 3).toUpperCase(), capacity: 2 };
+                  const selectedCount = selectedDayShifts.filter(s => {
+                    const preset = SHIFT_PRESETS.find(p => p.type === selectedShiftType);
+                    return s.store_location === store && preset && matchesPreset(s, preset);
+                  }).length;
+                  const state = staffingState(selectedCount, meta.capacity);
+                  return (
+                    <View key={store} style={styles.gridRow}>
+                      <View style={styles.storeCell}>
+                        <Text style={[styles.storeCode, { color: statusColor(state) }]}>{meta.code}</Text>
+                        <Text style={styles.storeName} numberOfLines={1}>{shortStoreName(store)}</Text>
+                        <View style={styles.storeCountRow}>
+                          <View style={[styles.storeStatusDot, { backgroundColor: statusColor(state) }]} />
+                          <Text style={[styles.storeCount, { color: statusColor(state) }]}>
+                            {selectedCount}/{meta.capacity}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {SHIFT_PRESETS.map((preset) => {
+                        const activeColumn = selectedShiftType === preset.type;
+                        const cellShifts = selectedDayShifts.filter(s => s.store_location === store && matchesPreset(s, preset));
+                        return (
+                          <TouchableOpacity
+                            key={`${store}-${preset.type}`}
+                            style={[styles.rosterCell, activeColumn && styles.rosterCellActive]}
+                            onPress={() => onCellPress(cellShifts)}
+                            disabled={cellShifts.length === 0}
+                            testID={`cal-cell-${store}-${preset.type}`}
+                          >
+                            {cellShifts.length === 0 ? (
+                              activeColumn && store === 'Kho Tổng 22-89C' ? <Text style={styles.offText}>OFF</Text> : null
+                            ) : (
+                              cellShifts.slice(0, 3).map((s) => {
+                                const mine = s.user_id === user?.id;
+                                const pending = s.approval_status !== 'approved';
+                                return (
+                                  <View
+                                    key={s.id}
+                                    style={[
+                                      styles.staffPill,
+                                      activeColumn && styles.staffPillActive,
+                                      pending && styles.staffPillPending,
+                                      mine && styles.staffPillMine,
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[styles.staffName, activeColumn && styles.staffNameActive, mine && styles.staffNameMine]}
+                                      numberOfLines={1}
+                                    >
+                                      {s.user_name || s.user_email}
+                                    </Text>
+                                  </View>
+                                );
+                              })
+                            )}
+                            {cellShifts.length > 3 ? (
+                              <Text style={[styles.moreText, activeColumn && styles.moreTextActive]}>+{cellShifts.length - 3}</Text>
+                            ) : null}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
             <Text style={styles.gridFootnote}>
               {t('selected_shift')}: {t(`shift_${selectedPreset.type}` as any)} {selectedPreset.start} - {selectedPreset.end}
             </Text>
@@ -400,22 +419,29 @@ export default function Calendar() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  container: { padding: 18, paddingBottom: 30 },
-  title: { fontSize: 32, fontWeight: '900', color: colors.textMain, letterSpacing: 0, marginBottom: 18 },
+  container: { padding: 14, paddingBottom: 28 },
+  title: { fontSize: 28, fontWeight: '900', color: colors.textMain, letterSpacing: 0, marginBottom: 12 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  legendRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginBottom: 22 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  legendDot: { width: 10, height: 10, borderRadius: 5, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 2 },
-  legendText: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
-  weekNav: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.background, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 8, marginBottom: 8 },
-  navBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
-  weekRange: { fontSize: 19, fontWeight: '900', color: colors.textMain },
+  legendRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  legendItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.background,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5,
+  },
+  legendDot: { width: 8, height: 8, borderRadius: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 2 },
+  legendText: { color: colors.textMuted, fontSize: 11, fontWeight: '800' },
+  weekNav: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.background, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 6, marginBottom: 10 },
+  navBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
+  weekRange: { fontSize: 17, fontWeight: '900', color: colors.textMain },
   todayLink: { color: colors.primary, fontSize: 13, fontWeight: '800', marginTop: 2 },
-  dayTabs: { flexDirection: 'row', gap: 4, marginBottom: 14 },
-  dayTab: { flex: 1, height: 62, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  dayTabs: { flexDirection: 'row', gap: 5, marginBottom: 12 },
+  dayTab: {
+    flex: 1, height: 54, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
+  },
+  dayTabToday: { borderColor: '#93C5FD', backgroundColor: '#EFF6FF' },
   dayTabActive: { backgroundColor: colors.primary },
-  dayTabName: { fontSize: 12, fontWeight: '900', color: colors.textMuted },
-  dayTabNum: { fontSize: 21, fontWeight: '900', color: colors.textMain, marginTop: 2 },
+  dayTabName: { fontSize: 11, fontWeight: '900', color: colors.textMuted },
+  dayTabNum: { fontSize: 19, fontWeight: '900', color: colors.textMain, marginTop: 1 },
   dayTabTextActive: { color: colors.primaryFg },
   section: { marginTop: 4, marginBottom: 10, fontSize: 15, fontWeight: '700', color: colors.textMain },
   swapCard: { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 14, padding: 14, marginBottom: 10 },
@@ -428,30 +454,45 @@ const styles = StyleSheet.create({
   swapBtnText: { color: colors.textMain, fontWeight: '700', fontSize: 13 },
   swapBtnTextAccept: { color: colors.primaryFg, fontWeight: '700', fontSize: 13 },
   roster: { marginTop: 2 },
-  gridHeader: { flexDirection: 'row', gap: 7, alignItems: 'flex-end', marginBottom: 7 },
-  storeHeaderSpacer: { width: 78 },
-  shiftHeader: { flex: 1, minHeight: 40, borderTopLeftRadius: 12, borderTopRightRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  shiftHeaderActive: { backgroundColor: colors.primary },
-  shiftHeaderText: { color: colors.textMuted, fontWeight: '900', fontSize: 15 },
-  shiftHeaderTextActive: { color: colors.primaryFg },
-  gridRow: { flexDirection: 'row', gap: 7, marginBottom: 8 },
-  storeCell: { width: 78, justifyContent: 'center' },
-  storeCode: { fontSize: 17, fontWeight: '900', lineHeight: 19 },
-  storeName: { color: colors.textMuted, fontSize: 9, fontWeight: '800', marginTop: 1 },
-  storeCountRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
-  storeStatusDot: { width: 13, height: 13, borderRadius: 7 },
-  storeCount: { fontSize: 13, fontWeight: '900' },
-  rosterCell: {
-    flex: 1, minHeight: 82, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 9,
+  rosterScroller: { paddingBottom: 2 },
+  rosterTable: { minWidth: 620, flex: 1 },
+  gridHeader: { flexDirection: 'row', gap: 6, alignItems: 'flex-end', marginBottom: 6 },
+  storeHeaderSpacer: { width: 90 },
+  shiftHeader: {
+    flex: 1, minHeight: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
-    justifyContent: 'center',
   },
-  rosterCellActive: { borderWidth: 6, borderColor: colors.primary, paddingHorizontal: 6, paddingVertical: 6 },
-  staffName: { color: colors.textLight, fontSize: 16, fontWeight: '900', lineHeight: 24 },
+  shiftHeaderActive: { backgroundColor: colors.primary },
+  shiftHeaderText: { color: colors.textMuted, fontWeight: '900', fontSize: 13 },
+  shiftHeaderTextActive: { color: colors.primaryFg },
+  gridRow: { flexDirection: 'row', gap: 6, marginBottom: 6 },
+  storeCell: {
+    width: 90, justifyContent: 'center', backgroundColor: colors.background, borderWidth: 1,
+    borderColor: colors.border, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 7,
+  },
+  storeCode: { fontSize: 15, fontWeight: '900', lineHeight: 17 },
+  storeName: { color: colors.textMuted, fontSize: 10, fontWeight: '800', marginTop: 1 },
+  storeCountRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  storeStatusDot: { width: 10, height: 10, borderRadius: 5 },
+  storeCount: { fontSize: 12, fontWeight: '900' },
+  rosterCell: {
+    flex: 1, minHeight: 64, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 7,
+    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
+    justifyContent: 'center', gap: 4,
+  },
+  rosterCellActive: { borderWidth: 1, borderColor: '#93C5FD', backgroundColor: '#EFF6FF' },
+  staffPill: {
+    minHeight: 22, borderRadius: 7, backgroundColor: '#F8FAFC', paddingHorizontal: 7,
+    justifyContent: 'center', borderWidth: 1, borderColor: 'transparent',
+  },
+  staffPillActive: { backgroundColor: colors.background },
+  staffPillPending: { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' },
+  staffPillMine: { borderColor: colors.primary, backgroundColor: '#EFF6FF' },
+  staffName: { color: colors.textLight, fontSize: 12, fontWeight: '900', lineHeight: 16 },
   staffNameActive: { color: colors.textMain },
   staffNameMine: { color: colors.primary },
-  moreText: { color: colors.textLight, fontWeight: '900', fontSize: 12, marginTop: 2 },
+  moreText: { color: colors.textLight, fontWeight: '900', fontSize: 11, marginTop: 1 },
   moreTextActive: { color: colors.textMain },
-  offText: { color: colors.textMain, fontWeight: '900', fontSize: 18, textAlign: 'center' },
-  gridFootnote: { color: colors.textMuted, textAlign: 'center', marginTop: 10, fontWeight: '700', fontSize: 12 },
+  offText: { color: colors.textMain, fontWeight: '900', fontSize: 14, textAlign: 'center' },
+  gridFootnote: { color: colors.textMuted, textAlign: 'center', marginTop: 8, fontWeight: '700', fontSize: 12 },
 });

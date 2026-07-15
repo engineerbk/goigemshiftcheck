@@ -209,8 +209,11 @@ class TaskProposalCreate(BaseModel):
     proposed_assigned_user_id: Optional[str] = None
 
 
-class TaskProposalReject(BaseModel):
-    reason: Optional[str] = ""
+class TaskProposalReview(BaseModel):
+    comment: Optional[str] = ""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    assigned_user_id: Optional[str] = None
 
 
 # ---------------- Notifications helpers ----------------
@@ -1571,7 +1574,7 @@ async def admin_task_proposals(admin: dict = Depends(require_admin)):
 
 
 @api_router.post("/admin/task-proposals/{proposal_id}/approve")
-async def approve_task_proposal(proposal_id: str, admin: dict = Depends(require_admin)):
+async def approve_task_proposal(proposal_id: str, payload: Optional[TaskProposalReview] = None, admin: dict = Depends(require_admin)):
     proposal = await db.task_proposals.find_one({"id": proposal_id}, {"_id": 0})
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
@@ -1584,9 +1587,11 @@ async def approve_task_proposal(proposal_id: str, admin: dict = Depends(require_
         raise HTTPException(status_code=403, detail="Not allowed to review this proposal")
 
     now = datetime.now(timezone.utc).isoformat()
+    review = payload or TaskProposalReview()
     task_update = {
         "updated_at": now,
         "updated_by": admin["id"],
+        "last_review_comment": review.comment or "",
     }
     if proposal.get("proposal_type") == "cancel":
         task_update["status"] = "cancelled"
@@ -1604,26 +1609,45 @@ async def approve_task_proposal(proposal_id: str, admin: dict = Depends(require_
             task_update["assigned_user_id"] = assigned["id"]
             task_update["assigned_user_name"] = assigned.get("name", "")
             task_update["assigned_user_email"] = assigned.get("email", "")
+    if review.title is not None:
+        task_update["title"] = review.title.strip()
+    if review.description is not None:
+        task_update["description"] = review.description or ""
+    if review.assigned_user_id is not None:
+        if review.assigned_user_id:
+            assigned = await db.users.find_one({"id": review.assigned_user_id}, {"_id": 0})
+            if not assigned:
+                raise HTTPException(status_code=404, detail="Assigned user not found")
+            if not await user_has_shift_at_store(review.assigned_user_id, task.get("store_location", "")):
+                raise HTTPException(status_code=400, detail="Assigned employee must have an approved shift at this store")
+            task_update["assigned_user_id"] = assigned["id"]
+            task_update["assigned_user_name"] = assigned.get("name", "")
+            task_update["assigned_user_email"] = assigned.get("email", "")
+        else:
+            task_update["assigned_user_id"] = None
+            task_update["assigned_user_name"] = ""
+            task_update["assigned_user_email"] = ""
     await db.tasks.update_one({"id": task["id"]}, {"$set": task_update})
     await db.task_proposals.update_one({"id": proposal_id}, {"$set": {
         "status": "approved",
         "reviewed_at": now,
         "reviewed_by": admin["id"],
         "reviewed_by_name": admin.get("name", ""),
+        "review_comment": review.comment or "",
     }})
     if proposal.get("requested_by"):
         await _notify(
             proposal["requested_by"],
             "task_proposal_approved",
             "Task proposal approved",
-            task.get("title", ""),
+            review.comment or task.get("title", ""),
             {"proposal_id": proposal_id, "task_id": task["id"]},
         )
     return await db.task_proposals.find_one({"id": proposal_id}, {"_id": 0})
 
 
 @api_router.post("/admin/task-proposals/{proposal_id}/reject")
-async def reject_task_proposal(proposal_id: str, payload: TaskProposalReject, admin: dict = Depends(require_admin)):
+async def reject_task_proposal(proposal_id: str, payload: Optional[TaskProposalReview] = None, admin: dict = Depends(require_admin)):
     proposal = await db.task_proposals.find_one({"id": proposal_id}, {"_id": 0})
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
@@ -1634,19 +1658,47 @@ async def reject_task_proposal(proposal_id: str, payload: TaskProposalReject, ad
         raise HTTPException(status_code=404, detail="Task not found")
     if not can_review_task_proposal(task, admin):
         raise HTTPException(status_code=403, detail="Not allowed to review this proposal")
+    review = payload or TaskProposalReview()
+    now = datetime.now(timezone.utc).isoformat()
+    task_update = {
+        "status": "open",
+        "updated_at": now,
+        "updated_by": admin["id"],
+        "last_review_comment": review.comment or "",
+    }
+    if review.title is not None:
+        task_update["title"] = review.title.strip()
+    if review.description is not None:
+        task_update["description"] = review.description or ""
+    if review.assigned_user_id is not None:
+        if review.assigned_user_id:
+            assigned = await db.users.find_one({"id": review.assigned_user_id}, {"_id": 0})
+            if not assigned:
+                raise HTTPException(status_code=404, detail="Assigned user not found")
+            if not await user_has_shift_at_store(review.assigned_user_id, task.get("store_location", "")):
+                raise HTTPException(status_code=400, detail="Assigned employee must have an approved shift at this store")
+            task_update["assigned_user_id"] = assigned["id"]
+            task_update["assigned_user_name"] = assigned.get("name", "")
+            task_update["assigned_user_email"] = assigned.get("email", "")
+        else:
+            task_update["assigned_user_id"] = None
+            task_update["assigned_user_name"] = ""
+            task_update["assigned_user_email"] = ""
+    await db.tasks.update_one({"id": task["id"]}, {"$set": task_update})
     await db.task_proposals.update_one({"id": proposal_id}, {"$set": {
         "status": "rejected",
-        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        "reviewed_at": now,
         "reviewed_by": admin["id"],
         "reviewed_by_name": admin.get("name", ""),
-        "rejected_reason": payload.reason or "",
+        "review_comment": review.comment or "",
+        "rejected_reason": review.comment or "",
     }})
     if proposal.get("requested_by"):
         await _notify(
             proposal["requested_by"],
             "task_proposal_rejected",
             "Task proposal rejected",
-            payload.reason or task.get("title", ""),
+            review.comment or task.get("title", ""),
             {"proposal_id": proposal_id, "task_id": task["id"]},
         )
     return await db.task_proposals.find_one({"id": proposal_id}, {"_id": 0})
