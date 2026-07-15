@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TouchableOpacity, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TouchableOpacity, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -16,6 +16,12 @@ function fmtDt(iso?: string | null) {
   return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
+function roleLabel(role: string | undefined, t: (key: any) => string) {
+  if (role === 'admin' || role === 'owner') return t('role_owner');
+  if (role === 'manager') return t('role_manager');
+  return t('role_employee');
+}
+
 export default function Admin() {
   const { t } = useLang();
   const { user, refresh } = useAuth();
@@ -28,6 +34,9 @@ export default function Admin() {
   const [pendingShifts, setPendingShifts] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [roleTarget, setRoleTarget] = useState<any>(null);
+  const [draftRole, setDraftRole] = useState<'employee' | 'manager' | 'owner'>('employee');
+  const [draftStore, setDraftStore] = useState(STORE_LOCATIONS[0]);
 
   const load = useCallback(async () => {
     try {
@@ -56,28 +65,30 @@ export default function Admin() {
       await load();
       if (target.id === user?.id) await refresh();
       Alert.alert(t('saved'), `${updated.email}\n${t('role')}: ${updated.role}${updated.store_location ? `\n${t('store_location')}: ${updated.store_location}` : ''}`);
+      return true;
     } catch (e: any) {
       Alert.alert(t('failed'), e.message);
+      return false;
     }
   };
 
-  const assignManager = (target: any) => {
-    if (Platform.OS === 'web') {
-      const store = window.prompt(t('manager_store_prompt'), target.store_location || STORE_LOCATIONS[0]);
-      if (store) updateRole(target, 'manager', store);
-      return;
-    }
-    Alert.alert(
-      t('manager_store_prompt'),
-      target.name || target.email,
-      [
-        ...STORE_LOCATIONS.map((store) => ({
-          text: store,
-          onPress: () => updateRole(target, 'manager', store),
-        })),
-        { text: t('cancel'), style: 'cancel' as const },
-      ],
-    );
+  const openRoleEditor = (target: any) => {
+    setRoleTarget(target);
+    const normalizedRole = target.role === 'admin' || target.role === 'owner'
+      ? 'owner'
+      : target.role === 'manager'
+        ? 'manager'
+        : 'employee';
+    setDraftRole(normalizedRole);
+    setDraftStore(target.store_location || STORE_LOCATIONS[0]);
+  };
+
+  const closeRoleEditor = () => setRoleTarget(null);
+
+  const saveRoleEditor = async () => {
+    if (!roleTarget) return;
+    const ok = await updateRole(roleTarget, draftRole, draftRole === 'manager' ? draftStore : '');
+    if (ok) closeRoleEditor();
   };
 
   if (loading) {
@@ -184,25 +195,83 @@ export default function Admin() {
             <View style={styles.roleBox}>
               <View style={[styles.roleTag, (u.role === 'admin' || u.role === 'owner' || u.role === 'manager') && styles.roleTagAdmin]}>
                 <Text style={[styles.roleTagText, (u.role === 'admin' || u.role === 'owner' || u.role === 'manager') && styles.roleTagTextAdmin]}>
-                  {u.role === 'admin' ? 'owner' : u.role}
+                  {roleLabel(u.role, t)}
                 </Text>
               </View>
               {isOwner && u.id !== user?.id ? (
                 <View style={styles.roleActions}>
-                  <TouchableOpacity style={styles.roleActionBtn} onPress={() => updateRole(u, 'employee')}>
-                    <Text style={styles.roleActionText}>{t('role_employee')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.roleActionBtn} onPress={() => assignManager(u)}>
-                    <Text style={styles.roleActionText}>{t('role_manager')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.roleActionBtn} onPress={() => updateRole(u, 'owner')}>
-                    <Text style={styles.roleActionText}>{t('role_owner')}</Text>
+                  <TouchableOpacity style={styles.roleActionBtn} onPress={() => openRoleEditor(u)} testID={`role-edit-${u.id}`}>
+                    <Text style={styles.roleActionText}>{t('manage_role')}</Text>
                   </TouchableOpacity>
                 </View>
               ) : null}
             </View>
           </View>
         ))}
+
+        <Modal visible={!!roleTarget} animationType="slide" transparent onRequestClose={closeRoleEditor}>
+          <TouchableOpacity activeOpacity={1} style={styles.modalBg} onPress={closeRoleEditor}>
+            <TouchableOpacity activeOpacity={1} style={styles.modalSheet} onPress={() => {}}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>{t('manage_role')}</Text>
+              {roleTarget ? (
+                <Text style={styles.modalSub}>
+                  {roleTarget.name || roleTarget.email}
+                </Text>
+              ) : null}
+
+              <Text style={styles.modalLabel}>{t('role')}</Text>
+              <View style={styles.roleChoiceRow}>
+                {([
+                  ['employee', t('role_employee')],
+                  ['manager', t('role_manager')],
+                  ['owner', t('role_owner')],
+                ] as const).map(([role, label]) => (
+                  <TouchableOpacity
+                    key={role}
+                    style={[styles.roleChoice, draftRole === role && styles.roleChoiceActive]}
+                    onPress={() => setDraftRole(role)}
+                    testID={`role-choice-${role}`}
+                  >
+                    <Text style={[styles.roleChoiceText, draftRole === role && styles.roleChoiceTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {draftRole === 'manager' ? (
+                <>
+                  <Text style={styles.modalLabel}>{t('store_location')}</Text>
+                  <View style={styles.storePicker}>
+                    {STORE_LOCATIONS.map((store) => (
+                      <TouchableOpacity
+                        key={store}
+                        style={[styles.storeChoice, draftStore === store && styles.storeChoiceActive]}
+                        onPress={() => setDraftStore(store)}
+                        testID={`manager-store-${store}`}
+                      >
+                        <Ionicons
+                          name={draftStore === store ? 'checkmark-circle' : 'storefront-outline'}
+                          size={18}
+                          color={draftStore === store ? colors.primary : colors.textMuted}
+                        />
+                        <Text style={[styles.storeChoiceText, draftStore === store && styles.storeChoiceTextActive]}>{store}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={closeRoleEditor}>
+                  <Text style={styles.modalCancelText}>{t('cancel')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalSaveBtn} onPress={saveRoleEditor} testID="role-save">
+                  <Text style={styles.modalSaveText}>{t('save_changes')}</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
 
         <Text style={styles.sectionTitle}>{t('upcoming_shifts')}</Text>
         {shifts.slice(0, 10).map((s) => (
@@ -280,6 +349,27 @@ const styles = StyleSheet.create({
   roleActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' },
   roleActionBtn: { backgroundColor: colors.secondary, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   roleActionText: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalSheet: { backgroundColor: colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '82%' },
+  modalHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 14 },
+  modalTitle: { fontSize: 20, fontWeight: '900', color: colors.textMain },
+  modalSub: { color: colors.textMuted, fontSize: 13, marginTop: 4, marginBottom: 18 },
+  modalLabel: { color: colors.textMain, fontSize: 13, fontWeight: '800', marginBottom: 8, marginTop: 14 },
+  roleChoiceRow: { flexDirection: 'row', gap: 8 },
+  roleChoice: { flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  roleChoiceActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  roleChoiceText: { color: colors.textMuted, fontWeight: '800', fontSize: 12 },
+  roleChoiceTextActive: { color: colors.primaryFg },
+  storePicker: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, overflow: 'hidden' },
+  storeChoice: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  storeChoiceActive: { backgroundColor: '#EFF6FF' },
+  storeChoiceText: { color: colors.textMain, fontSize: 14, fontWeight: '600', flex: 1 },
+  storeChoiceTextActive: { color: colors.primary, fontWeight: '800' },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  modalCancelBtn: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingVertical: 13, alignItems: 'center' },
+  modalCancelText: { color: colors.textMuted, fontWeight: '800' },
+  modalSaveBtn: { flex: 1, backgroundColor: colors.primary, borderRadius: 999, paddingVertical: 13, alignItems: 'center' },
+  modalSaveText: { color: colors.primaryFg, fontWeight: '900' },
   empty: { padding: 18, alignItems: 'center', backgroundColor: colors.background, borderRadius: 14, borderWidth: 1, borderColor: colors.border },
   emptyText: { color: colors.textMuted },
 });

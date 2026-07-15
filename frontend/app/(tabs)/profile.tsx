@@ -7,6 +7,12 @@ import { useAuth } from '../../src/auth';
 import { useLang } from '../../src/i18n';
 import { colors } from '../../src/theme';
 
+function roleLabel(role: string | undefined, t: (key: any) => string) {
+  if (role === 'admin' || role === 'owner') return t('role_owner');
+  if (role === 'manager') return t('role_manager');
+  return t('role_employee');
+}
+
 export default function Profile() {
   const { user, signOut, refresh } = useAuth();
   const { lang, setLang, t } = useLang();
@@ -43,7 +49,7 @@ export default function Profile() {
           <Text style={styles.name}>{user?.name}</Text>
           <Text style={styles.email}>{user?.email}</Text>
           <View style={styles.roleBadge}>
-            <Text style={styles.roleText}>{user?.role?.toUpperCase()}</Text>
+            <Text style={styles.roleText}>{roleLabel(user?.role, t).toUpperCase()}</Text>
           </View>
         </View>
 
@@ -57,7 +63,7 @@ export default function Profile() {
           <View style={styles.menuItem}>
             <Ionicons name="shield-outline" size={20} color={colors.textMuted} />
             <Text style={styles.menuLabel}>{t('role')}</Text>
-            <Text style={styles.menuValue}>{user?.role}</Text>
+            <Text style={styles.menuValue}>{roleLabel(user?.role, t)}</Text>
           </View>
           <View style={styles.divider} />
           <View style={[styles.menuItem, { flexDirection: 'column', alignItems: 'stretch', gap: 10 }]}>

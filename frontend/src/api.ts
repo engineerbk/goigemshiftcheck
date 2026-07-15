@@ -6,7 +6,8 @@ export type User = {
   id: string;
   email: string;
   name: string;
-  role: 'employee' | 'admin';
+  role: 'employee' | 'manager' | 'owner' | 'admin';
+  store_location?: string;
   created_at?: string;
 };
 
@@ -23,19 +24,23 @@ export async function setToken(token: string | null) {
 
 async function request(path: string, opts: RequestInit = {}) {
   const token = await getToken();
+  const method = opts.method || 'GET';
+  const url = `${BASE}/api${path}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string> | undefined),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}/api${path}`, { ...opts, headers });
+  const res = await fetch(url, { ...opts, headers });
   const text = await res.text();
   let data: any = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
   if (!res.ok) {
     const detail = data?.detail || data || `HTTP ${res.status}`;
     const message = typeof detail === 'string' ? detail : JSON.stringify(detail);
-    throw new Error(message);
+    const error = `${method} ${url} failed (${res.status}): ${message}`;
+    console.error(error);
+    throw new Error(error);
   }
   return data;
 }
@@ -62,6 +67,8 @@ export const api = {
   deleteShift: (id: string) => request(`/shifts/${id}`, { method: 'DELETE' }),
 
   adminEmployees: () => request('/admin/employees'),
+  adminUpdateUserRole: (id: string, role: 'employee' | 'manager' | 'owner' | 'admin', store_location = '') =>
+    request(`/admin/users/${id}/role`, { method: 'PATCH', body: JSON.stringify({ role, store_location }) }),
   adminAttendance: () => request('/admin/attendance'),
   adminShifts: () => request('/admin/shifts'),
   adminStats: () => request('/admin/stats'),
