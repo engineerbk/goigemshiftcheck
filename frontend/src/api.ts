@@ -70,7 +70,26 @@ export const api = {
   adminUpdateUserRole: (id: string, role: 'employee' | 'manager' | 'owner' | 'admin', store_location = '') =>
     request(`/admin/users/${id}/role`, { method: 'PATCH', body: JSON.stringify({ role, store_location }) }),
   adminAttendance: () => request('/admin/attendance'),
+  adminCreateAttendance: (body: {
+    user_id: string;
+    check_in?: string;
+    check_out?: string | null;
+    store_location?: string;
+    shift_id?: string;
+    check_in_local_date?: string;
+    check_in_local_time?: string;
+    check_out_local_time?: string;
+    note?: string;
+  }) => request('/admin/attendance', { method: 'POST', body: JSON.stringify(body) }),
+  adminUpdateAttendance: (id: string, body: any) =>
+    request(`/admin/attendance/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  adminApproveAttendance: (id: string) =>
+    request(`/admin/attendance/${id}/approve`, { method: 'POST' }),
+  adminRejectAttendance: (id: string) =>
+    request(`/admin/attendance/${id}/reject`, { method: 'POST' }),
   adminShifts: () => request('/admin/shifts'),
+  adminCreateShift: (body: { user_id: string; date: string; start_time: string; end_time: string; note?: string; store_location?: string; shift_type?: string }) =>
+    request('/admin/shifts', { method: 'POST', body: JSON.stringify(body) }),
   adminStats: () => request('/admin/stats'),
   adminReports: (period: 'all' | 'month' | 'week' = 'all') => request(`/admin/reports?period=${period}`),
   adminEmployeeReport: (userId: string, period: 'all' | 'month' | 'week' = 'all') =>
@@ -107,6 +126,17 @@ export const api = {
   adminRejectShift: (id: string, reason = '') =>
     request(`/admin/shifts/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   adminUnapproveShift: (id: string) => request(`/admin/shifts/${id}/unapprove`, { method: 'POST' }),
+
+  // tasks
+  adminTasks: () => request('/admin/tasks'),
+  adminCreateTask: (body: { title: string; description?: string; store_location: string; assigned_user_id?: string | null }) =>
+    request('/admin/tasks', { method: 'POST', body: JSON.stringify(body) }),
+  adminUpdateTask: (id: string, body: any) =>
+    request(`/admin/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  adminDeleteTask: (id: string) =>
+    request(`/admin/tasks/${id}`, { method: 'DELETE' }),
+  myTasks: () => request('/tasks/mine'),
+  completeTask: (id: string) => request(`/tasks/${id}/complete`, { method: 'POST' }),
 
   // notifications
   listNotifications: () => request('/notifications'),

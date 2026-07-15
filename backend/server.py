@@ -162,6 +162,45 @@ class UserRoleUpdate(BaseModel):
     store_location: Optional[str] = ""
 
 
+class AdminAttendanceCreate(BaseModel):
+    user_id: str
+    check_in: Optional[str] = None
+    check_out: Optional[str] = None
+    store_location: Optional[str] = ""
+    shift_id: Optional[str] = None
+    check_in_local_date: Optional[str] = None
+    check_in_local_time: Optional[str] = None
+    check_out_local_time: Optional[str] = None
+    note: Optional[str] = ""
+
+
+class AdminAttendanceUpdate(BaseModel):
+    check_in: Optional[str] = None
+    check_out: Optional[str] = None
+    store_location: Optional[str] = None
+    shift_id: Optional[str] = None
+    check_in_local_date: Optional[str] = None
+    check_in_local_time: Optional[str] = None
+    check_out_local_time: Optional[str] = None
+    note: Optional[str] = None
+    approval_status: Optional[str] = None
+
+
+class TaskCreate(BaseModel):
+    title: str = Field(min_length=1)
+    description: Optional[str] = ""
+    store_location: str = Field(min_length=1)
+    assigned_user_id: Optional[str] = None
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    store_location: Optional[str] = None
+    assigned_user_id: Optional[str] = None
+    status: Optional[str] = None
+
+
 # ---------------- Notifications helpers ----------------
 async def _notify(user_id: str, ntype: str, title: str, body: str = "", data: Optional[dict] = None) -> None:
     if not user_id:
@@ -203,6 +242,49 @@ async def swap_touches_store(req: dict, store: str) -> bool:
         return True
     ns = req.get("new_shift") or {}
     return ns.get("store_location") == store
+
+
+async def require_store_access(user: dict, store_location: str) -> None:
+    if is_owner(user):
+        return
+    if is_manager(user) and store_location and user.get("store_location") == store_location:
+        return
+    raise HTTPException(status_code=403, detail="Managers can only access their assigned store")
+
+
+async def attendance_touches_store(record: dict, store_location: str) -> bool:
+    if not store_location:
+        return False
+    if record.get("store_location") == store_location:
+        return True
+    if record.get("shift_id"):
+        shift = await db.shifts.find_one({"id": record["shift_id"]}, {"_id": 0, "store_location": 1})
+        return bool(shift and shift.get("store_location") == store_location)
+    return False
+
+
+async def user_has_shift_at_store(user_id: str, store_location: str) -> bool:
+    if not user_id or not store_location:
+        return False
+    count = await db.shifts.count_documents({"user_id": user_id, "store_location": store_location})
+    return count > 0
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid datetime")
+
+
+def _duration_minutes(check_in: Optional[str], check_out: Optional[str]) -> Optional[int]:
+    start = _parse_iso_datetime(check_in)
+    end = _parse_iso_datetime(check_out)
+    if not start or not end:
+        return None
+    return max(0, int((end - start).total_seconds() // 60))
 
 
 # ---------------- Auth Routes ----------------
@@ -362,6 +444,7 @@ async def check_in(payload: CheckInRequest, user: dict = Depends(get_current_use
     matched_shift_start: Optional[str] = None
     matched_shift_end: Optional[str] = None
     matched_shift_type: Optional[str] = None
+    matched_shift_store: Optional[str] = None
     if payload.local_date and payload.local_time:
         sh = await db.shifts.find_one(
             {"user_id": user["id"], "date": payload.local_date},
@@ -376,6 +459,7 @@ async def check_in(payload: CheckInRequest, user: dict = Depends(get_current_use
                 matched_shift_start = sh.get("start_time")
                 matched_shift_end = sh.get("end_time")
                 matched_shift_type = sh.get("shift_type")
+                matched_shift_store = sh.get("store_location")
 
     record = {
         "id": str(uuid.uuid4()),
@@ -396,6 +480,8 @@ async def check_in(payload: CheckInRequest, user: dict = Depends(get_current_use
         "duration_minutes": None,
         "late_minutes": late_minutes,
         "early_leave_minutes": None,
+        "approval_status": "pending",
+        "store_location": matched_shift_store or "",
         "shift_id": matched_shift_id,
         "shift_start_time": matched_shift_start,
         "shift_end_time": matched_shift_end,
@@ -479,8 +565,131 @@ async def admin_attendance(admin: dict = Depends(require_admin)):
     else:
         store = admin.get("store_location", "")
         shift_ids = [s["id"] for s in await db.shifts.find({"store_location": store}, {"_id": 0, "id": 1}).to_list(5000)]
-        records = await db.attendance.find({"shift_id": {"$in": shift_ids}}, {"_id": 0}).sort("check_in", -1).to_list(1000)
+        records = await db.attendance.find(
+            {"$or": [{"store_location": store}, {"shift_id": {"$in": shift_ids}}]},
+            {"_id": 0},
+        ).sort("check_in", -1).to_list(1000)
     return records
+
+
+@api_router.post("/admin/attendance")
+async def admin_create_attendance(payload: AdminAttendanceCreate, admin: dict = Depends(require_admin)):
+    target_user = await db.users.find_one({"id": payload.user_id}, {"_id": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    shift = None
+    if payload.shift_id:
+        shift = await db.shifts.find_one({"id": payload.shift_id}, {"_id": 0})
+        if not shift:
+            raise HTTPException(status_code=404, detail="Shift not found")
+        if shift.get("user_id") != payload.user_id:
+            raise HTTPException(status_code=400, detail="Shift does not belong to this user")
+
+    store_location = payload.store_location or (shift or {}).get("store_location", "")
+    await require_store_access(admin, store_location)
+
+    now = datetime.now(timezone.utc).isoformat()
+    check_in = payload.check_in or now
+    check_out = payload.check_out
+    record = {
+        "id": str(uuid.uuid4()),
+        "user_id": target_user["id"],
+        "user_email": target_user["email"],
+        "user_name": target_user.get("name", ""),
+        "check_in": check_in,
+        "check_out": check_out,
+        "check_in_lat": None,
+        "check_in_lng": None,
+        "check_in_address": None,
+        "check_in_local_date": payload.check_in_local_date,
+        "check_in_local_time": payload.check_in_local_time,
+        "check_out_lat": None,
+        "check_out_lng": None,
+        "check_out_address": None,
+        "check_out_local_time": payload.check_out_local_time,
+        "duration_minutes": _duration_minutes(check_in, check_out),
+        "late_minutes": None,
+        "early_leave_minutes": None,
+        "approval_status": "approved",
+        "approved_at": now,
+        "approved_by": admin["id"],
+        "store_location": store_location,
+        "shift_id": payload.shift_id,
+        "shift_start_time": (shift or {}).get("start_time"),
+        "shift_end_time": (shift or {}).get("end_time"),
+        "shift_type": (shift or {}).get("shift_type"),
+        "note": payload.note or "",
+        "created_by": admin["id"],
+        "created_at": now,
+    }
+    await db.attendance.insert_one(record)
+    record.pop("_id", None)
+    return record
+
+
+@api_router.patch("/admin/attendance/{attendance_id}")
+async def admin_update_attendance(attendance_id: str, payload: AdminAttendanceUpdate, admin: dict = Depends(require_admin)):
+    record = await db.attendance.find_one({"id": attendance_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Attendance not found")
+    if is_manager(admin) and not await attendance_touches_store(record, admin.get("store_location", "")):
+        raise HTTPException(status_code=403, detail="Managers can only edit attendance in their store")
+
+    update = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="No changes")
+    if "approval_status" in update and update["approval_status"] not in {"pending", "approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="Invalid approval status")
+    if "shift_id" in update and update["shift_id"]:
+        shift = await db.shifts.find_one({"id": update["shift_id"]}, {"_id": 0})
+        if not shift:
+            raise HTTPException(status_code=404, detail="Shift not found")
+        await require_store_access(admin, shift.get("store_location", ""))
+        update["store_location"] = shift.get("store_location", "")
+        update["shift_start_time"] = shift.get("start_time")
+        update["shift_end_time"] = shift.get("end_time")
+        update["shift_type"] = shift.get("shift_type")
+    if "store_location" in update:
+        await require_store_access(admin, update["store_location"])
+
+    next_check_in = update.get("check_in", record.get("check_in"))
+    next_check_out = update.get("check_out", record.get("check_out"))
+    update["duration_minutes"] = _duration_minutes(next_check_in, next_check_out)
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update["updated_by"] = admin["id"]
+    await db.attendance.update_one({"id": attendance_id}, {"$set": update})
+    return await db.attendance.find_one({"id": attendance_id}, {"_id": 0})
+
+
+@api_router.post("/admin/attendance/{attendance_id}/approve")
+async def admin_approve_attendance(attendance_id: str, admin: dict = Depends(require_admin)):
+    record = await db.attendance.find_one({"id": attendance_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Attendance not found")
+    if is_manager(admin) and not await attendance_touches_store(record, admin.get("store_location", "")):
+        raise HTTPException(status_code=403, detail="Managers can only approve attendance in their store")
+    await db.attendance.update_one({"id": attendance_id}, {"$set": {
+        "approval_status": "approved",
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "approved_by": admin["id"],
+    }})
+    return await db.attendance.find_one({"id": attendance_id}, {"_id": 0})
+
+
+@api_router.post("/admin/attendance/{attendance_id}/reject")
+async def admin_reject_attendance(attendance_id: str, admin: dict = Depends(require_admin)):
+    record = await db.attendance.find_one({"id": attendance_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Attendance not found")
+    if is_manager(admin) and not await attendance_touches_store(record, admin.get("store_location", "")):
+        raise HTTPException(status_code=403, detail="Managers can only reject attendance in their store")
+    await db.attendance.update_one({"id": attendance_id}, {"$set": {
+        "approval_status": "rejected",
+        "rejected_at": datetime.now(timezone.utc).isoformat(),
+        "rejected_by": admin["id"],
+    }})
+    return await db.attendance.find_one({"id": attendance_id}, {"_id": 0})
 
 
 @api_router.get("/admin/shifts")
@@ -498,7 +707,10 @@ async def admin_stats(admin: dict = Depends(require_admin)):
     else:
         store = admin.get("store_location", "")
         shift_ids = [s["id"] for s in await db.shifts.find({"store_location": store}, {"_id": 0, "id": 1}).to_list(5000)]
-        active_now = await db.attendance.count_documents({"check_out": None, "shift_id": {"$in": shift_ids}})
+        active_now = await db.attendance.count_documents({
+            "check_out": None,
+            "$or": [{"store_location": store}, {"shift_id": {"$in": shift_ids}}],
+        })
     total_shifts = await db.shifts.count_documents(shift_query)
     today = datetime.now(timezone.utc).date().isoformat()
     shifts_today = await db.shifts.count_documents({**shift_query, "date": today})
@@ -882,6 +1094,47 @@ class ShiftUpdate(BaseModel):
     shift_type: Optional[str] = None
 
 
+class AdminShiftCreate(ShiftCreate):
+    user_id: str
+
+
+@api_router.post("/admin/shifts")
+async def admin_create_shift(payload: AdminShiftCreate, admin: dict = Depends(require_admin)):
+    target_user = await db.users.find_one({"id": payload.user_id}, {"_id": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    store_location = payload.store_location or ""
+    await require_store_access(admin, store_location)
+    shift = {
+        "id": str(uuid.uuid4()),
+        "user_id": target_user["id"],
+        "user_email": target_user["email"],
+        "user_name": target_user.get("name", ""),
+        "date": payload.date,
+        "start_time": payload.start_time,
+        "end_time": payload.end_time,
+        "note": payload.note or "",
+        "store_location": store_location,
+        "shift_type": payload.shift_type or "",
+        "status": "scheduled",
+        "approval_status": "approved",
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "approved_by": admin["id"],
+        "created_by": admin["id"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.shifts.insert_one(shift)
+    shift.pop("_id", None)
+    await _notify(
+        target_user["id"],
+        "shift_assigned",
+        f"New shift assigned: {shift['date']} {shift['start_time']}–{shift['end_time']}",
+        f"Assigned by {admin.get('name', 'Admin')}",
+        {"shift_id": shift["id"]},
+    )
+    return shift
+
+
 @api_router.patch("/admin/shifts/{shift_id}")
 async def admin_update_shift(shift_id: str, payload: ShiftUpdate, admin: dict = Depends(require_admin)):
     update = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
@@ -1027,6 +1280,159 @@ async def admin_unapprove_shift(shift_id: str, admin: dict = Depends(require_adm
             {"shift_id": shift_id},
         )
     return await db.shifts.find_one({"id": shift_id}, {"_id": 0})
+
+
+# ---------------- Tasks ----------------
+async def _validate_task_assignment(payload: TaskCreate | TaskUpdate, admin: dict, existing: Optional[dict] = None) -> tuple[str, Optional[dict]]:
+    store_location = payload.store_location if payload.store_location is not None else (existing or {}).get("store_location", "")
+    assigned_user_id = payload.assigned_user_id if payload.assigned_user_id is not None else (existing or {}).get("assigned_user_id")
+    if not store_location:
+        raise HTTPException(status_code=400, detail="Task store is required")
+    await require_store_access(admin, store_location)
+
+    assigned_user = None
+    if assigned_user_id:
+        assigned_user = await db.users.find_one({"id": assigned_user_id}, {"_id": 0})
+        if not assigned_user:
+            raise HTTPException(status_code=404, detail="Assigned user not found")
+        if not await user_has_shift_at_store(assigned_user_id, store_location):
+            raise HTTPException(status_code=400, detail="Assigned employee must have a shift at this store")
+    elif is_manager(admin):
+        raise HTTPException(status_code=400, detail="Managers must assign tasks to an employee")
+    return store_location, assigned_user
+
+
+@api_router.get("/admin/tasks")
+async def admin_tasks(admin: dict = Depends(require_admin)):
+    query = scoped_store_query(admin)
+    items = await db.tasks.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return items
+
+
+@api_router.post("/admin/tasks")
+async def admin_create_task(payload: TaskCreate, admin: dict = Depends(require_admin)):
+    store_location, assigned_user = await _validate_task_assignment(payload, admin)
+    now = datetime.now(timezone.utc).isoformat()
+    task = {
+        "id": str(uuid.uuid4()),
+        "title": payload.title.strip(),
+        "description": payload.description or "",
+        "store_location": store_location,
+        "assigned_user_id": payload.assigned_user_id or None,
+        "assigned_user_name": (assigned_user or {}).get("name", ""),
+        "assigned_user_email": (assigned_user or {}).get("email", ""),
+        "status": "open",
+        "created_by": admin["id"],
+        "created_by_name": admin.get("name", ""),
+        "created_by_role": admin.get("role", ""),
+        "created_at": now,
+        "completed_at": None,
+        "completed_by": None,
+        "completed_by_name": None,
+    }
+    await db.tasks.insert_one(task)
+    task.pop("_id", None)
+
+    if task["assigned_user_id"]:
+        await _notify(
+            task["assigned_user_id"],
+            "task_assigned",
+            f"New task: {task['title']}",
+            f"{store_location} • assigned by {admin.get('name', 'Admin')}",
+            {"task_id": task["id"]},
+        )
+    else:
+        managers = await db.users.find(
+            {"role": "manager", "store_location": store_location},
+            {"_id": 0, "id": 1},
+        ).to_list(50)
+        for manager in managers:
+            await _notify(
+                manager["id"],
+                "task_assigned",
+                f"Store task: {task['title']}",
+                f"{store_location} • assigned by {admin.get('name', 'Admin')}",
+                {"task_id": task["id"]},
+            )
+    return task
+
+
+@api_router.patch("/admin/tasks/{task_id}")
+async def admin_update_task(task_id: str, payload: TaskUpdate, admin: dict = Depends(require_admin)):
+    existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await require_store_access(admin, existing.get("store_location", ""))
+    if is_manager(admin) and existing.get("created_by") != admin["id"]:
+        raise HTTPException(status_code=403, detail="Managers can only edit tasks they created")
+    update = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="No changes")
+    if "status" in update and update["status"] not in {"open", "completed", "cancelled"}:
+        raise HTTPException(status_code=400, detail="Invalid task status")
+    if "store_location" in update or "assigned_user_id" in update:
+        _, assigned_user = await _validate_task_assignment(payload, admin, existing)
+        if "assigned_user_id" in update:
+            update["assigned_user_name"] = (assigned_user or {}).get("name", "")
+            update["assigned_user_email"] = (assigned_user or {}).get("email", "")
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update["updated_by"] = admin["id"]
+    await db.tasks.update_one({"id": task_id}, {"$set": update})
+    return await db.tasks.find_one({"id": task_id}, {"_id": 0})
+
+
+@api_router.delete("/admin/tasks/{task_id}")
+async def admin_delete_task(task_id: str, admin: dict = Depends(require_admin)):
+    existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await require_store_access(admin, existing.get("store_location", ""))
+    if is_manager(admin) and existing.get("created_by") != admin["id"]:
+        raise HTTPException(status_code=403, detail="Managers can only delete tasks they created")
+    await db.tasks.delete_one({"id": task_id})
+    return {"ok": True}
+
+
+@api_router.get("/tasks/mine")
+async def my_tasks(user: dict = Depends(get_current_user)):
+    if is_owner(user):
+        query = {}
+    elif is_manager(user):
+        query = {"store_location": user.get("store_location", ""), "$or": [
+            {"assigned_user_id": None},
+            {"assigned_user_id": ""},
+            {"assigned_user_id": user["id"]},
+        ]}
+    else:
+        query = {"assigned_user_id": user["id"]}
+    items = await db.tasks.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return items
+
+
+@api_router.post("/tasks/{task_id}/complete")
+async def complete_task(task_id: str, user: dict = Depends(get_current_user)):
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    allowed = False
+    if is_owner(user):
+        allowed = True
+    elif is_manager(user):
+        allowed = (
+            task.get("store_location") == user.get("store_location", "") and
+            task.get("assigned_user_id") in (None, "", user["id"])
+        )
+    else:
+        allowed = task.get("assigned_user_id") == user["id"]
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Not allowed to complete this task")
+    await db.tasks.update_one({"id": task_id}, {"$set": {
+        "status": "completed",
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "completed_by": user["id"],
+        "completed_by_name": user.get("name", ""),
+    }})
+    return await db.tasks.find_one({"id": task_id}, {"_id": 0})
 
 
 # ---------------- Swap Requests ----------------
@@ -1352,8 +1758,14 @@ app.add_middleware(
 async def startup_event():
     await db.users.create_index("email", unique=True)
     await db.shifts.create_index("user_id")
+    await db.shifts.create_index("store_location")
     await db.attendance.create_index("user_id")
+    await db.attendance.create_index("store_location")
+    await db.attendance.create_index("approval_status")
     await db.notifications.create_index("user_id")
+    await db.tasks.create_index("store_location")
+    await db.tasks.create_index("assigned_user_id")
+    await db.tasks.create_index("status")
 
     # Seed admin
     existing = await db.users.find_one({"email": ADMIN_EMAIL.lower()})
