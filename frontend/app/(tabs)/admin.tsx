@@ -37,6 +37,8 @@ export default function Admin() {
   const [roleTarget, setRoleTarget] = useState<any>(null);
   const [draftRole, setDraftRole] = useState<'employee' | 'manager' | 'owner'>('employee');
   const [draftStore, setDraftStore] = useState(STORE_LOCATIONS[0]);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [roleMessage, setRoleMessage] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -64,11 +66,11 @@ export default function Admin() {
       setEmployees((rows) => rows.map((row) => row.id === target.id ? updated : row));
       await load();
       if (target.id === user?.id) await refresh();
-      Alert.alert(t('saved'), `${updated.email}\n${t('role')}: ${updated.role}${updated.store_location ? `\n${t('store_location')}: ${updated.store_location}` : ''}`);
-      return true;
+      return updated;
     } catch (e: any) {
       Alert.alert(t('failed'), e.message);
-      return false;
+      setRoleMessage(e.message || t('failed'));
+      return null;
     }
   };
 
@@ -81,14 +83,21 @@ export default function Admin() {
         : 'employee';
     setDraftRole(normalizedRole);
     setDraftStore(target.store_location || STORE_LOCATIONS[0]);
+    setRoleMessage('');
   };
 
   const closeRoleEditor = () => setRoleTarget(null);
 
   const saveRoleEditor = async () => {
-    if (!roleTarget) return;
-    const ok = await updateRole(roleTarget, draftRole, draftRole === 'manager' ? draftStore : '');
-    if (ok) closeRoleEditor();
+    if (!roleTarget || roleSaving) return;
+    setRoleSaving(true);
+    setRoleMessage(t('saving'));
+    const updated = await updateRole(roleTarget, draftRole, draftRole === 'manager' ? draftStore : '');
+    setRoleSaving(false);
+    if (updated) {
+      setRoleMessage(`${t('saved')}: ${roleLabel(updated.role, t)}${updated.store_location ? ` - ${updated.store_location}` : ''}`);
+      setTimeout(closeRoleEditor, 700);
+    }
   };
 
   if (loading) {
@@ -209,70 +218,6 @@ export default function Admin() {
           </View>
         ))}
 
-        <Modal visible={!!roleTarget} animationType="slide" transparent onRequestClose={closeRoleEditor}>
-          <TouchableOpacity activeOpacity={1} style={styles.modalBg} onPress={closeRoleEditor}>
-            <TouchableOpacity activeOpacity={1} style={styles.modalSheet} onPress={() => {}}>
-              <View style={styles.modalHandle} />
-              <Text style={styles.modalTitle}>{t('manage_role')}</Text>
-              {roleTarget ? (
-                <Text style={styles.modalSub}>
-                  {roleTarget.name || roleTarget.email}
-                </Text>
-              ) : null}
-
-              <Text style={styles.modalLabel}>{t('role')}</Text>
-              <View style={styles.roleChoiceRow}>
-                {([
-                  ['employee', t('role_employee')],
-                  ['manager', t('role_manager')],
-                  ['owner', t('role_owner')],
-                ] as const).map(([role, label]) => (
-                  <TouchableOpacity
-                    key={role}
-                    style={[styles.roleChoice, draftRole === role && styles.roleChoiceActive]}
-                    onPress={() => setDraftRole(role)}
-                    testID={`role-choice-${role}`}
-                  >
-                    <Text style={[styles.roleChoiceText, draftRole === role && styles.roleChoiceTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {draftRole === 'manager' ? (
-                <>
-                  <Text style={styles.modalLabel}>{t('store_location')}</Text>
-                  <View style={styles.storePicker}>
-                    {STORE_LOCATIONS.map((store) => (
-                      <TouchableOpacity
-                        key={store}
-                        style={[styles.storeChoice, draftStore === store && styles.storeChoiceActive]}
-                        onPress={() => setDraftStore(store)}
-                        testID={`manager-store-${store}`}
-                      >
-                        <Ionicons
-                          name={draftStore === store ? 'checkmark-circle' : 'storefront-outline'}
-                          size={18}
-                          color={draftStore === store ? colors.primary : colors.textMuted}
-                        />
-                        <Text style={[styles.storeChoiceText, draftStore === store && styles.storeChoiceTextActive]}>{store}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              ) : null}
-
-              <View style={styles.modalActions}>
-                <TouchableOpacity style={styles.modalCancelBtn} onPress={closeRoleEditor}>
-                  <Text style={styles.modalCancelText}>{t('cancel')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalSaveBtn} onPress={saveRoleEditor} testID="role-save">
-                  <Text style={styles.modalSaveText}>{t('save_changes')}</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
-
         <Text style={styles.sectionTitle}>{t('upcoming_shifts')}</Text>
         {shifts.slice(0, 10).map((s) => (
           <View key={s.id} style={styles.row} testID={`admin-shift-${s.id}`}>
@@ -285,6 +230,69 @@ export default function Admin() {
         ))}
         {shifts.length === 0 && <EmptyBox text={t('no_shifts_registered')} />}
       </ScrollView>
+      <Modal visible={!!roleTarget} animationType="slide" transparent onRequestClose={closeRoleEditor}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{t('manage_role')}</Text>
+            {roleTarget ? <Text style={styles.modalSub}>{roleTarget.name || roleTarget.email}</Text> : null}
+
+            <Text style={styles.modalLabel}>{t('role')}</Text>
+            <View style={styles.roleChoiceRow}>
+              {([
+                ['employee', t('role_employee')],
+                ['manager', t('role_manager')],
+                ['owner', t('role_owner')],
+              ] as const).map(([role, label]) => (
+                <TouchableOpacity
+                  key={role}
+                  style={[styles.roleChoice, draftRole === role && styles.roleChoiceActive]}
+                  onPress={() => setDraftRole(role)}
+                  testID={`role-choice-${role}`}
+                  disabled={roleSaving}
+                >
+                  <Text style={[styles.roleChoiceText, draftRole === role && styles.roleChoiceTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {draftRole === 'manager' ? (
+              <>
+                <Text style={styles.modalLabel}>{t('store_location')}</Text>
+                <ScrollView style={styles.storePicker}>
+                  {STORE_LOCATIONS.map((store) => (
+                    <TouchableOpacity
+                      key={store}
+                      style={[styles.storeChoice, draftStore === store && styles.storeChoiceActive]}
+                      onPress={() => setDraftStore(store)}
+                      testID={`manager-store-${store}`}
+                      disabled={roleSaving}
+                    >
+                      <Ionicons
+                        name={draftStore === store ? 'checkmark-circle' : 'storefront-outline'}
+                        size={18}
+                        color={draftStore === store ? colors.primary : colors.textMuted}
+                      />
+                      <Text style={[styles.storeChoiceText, draftStore === store && styles.storeChoiceTextActive]}>{store}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
+
+            {roleMessage ? <Text style={styles.roleMessage}>{roleMessage}</Text> : null}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={closeRoleEditor} disabled={roleSaving}>
+                <Text style={styles.modalCancelText}>{t('cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalSaveBtn, roleSaving && styles.modalSaveBtnDisabled]} onPress={saveRoleEditor} testID="role-save" disabled={roleSaving}>
+                {roleSaving ? <ActivityIndicator color={colors.primaryFg} /> : <Text style={styles.modalSaveText}>{t('save_changes')}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -360,15 +368,17 @@ const styles = StyleSheet.create({
   roleChoiceActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   roleChoiceText: { color: colors.textMuted, fontWeight: '800', fontSize: 12 },
   roleChoiceTextActive: { color: colors.primaryFg },
-  storePicker: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, overflow: 'hidden' },
+  storePicker: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, overflow: 'hidden', maxHeight: 260 },
   storeChoice: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   storeChoiceActive: { backgroundColor: '#EFF6FF' },
   storeChoiceText: { color: colors.textMain, fontSize: 14, fontWeight: '600', flex: 1 },
   storeChoiceTextActive: { color: colors.primary, fontWeight: '800' },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  roleMessage: { marginTop: 12, color: colors.textMuted, fontWeight: '700', fontSize: 13 },
   modalCancelBtn: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingVertical: 13, alignItems: 'center' },
   modalCancelText: { color: colors.textMuted, fontWeight: '800' },
   modalSaveBtn: { flex: 1, backgroundColor: colors.primary, borderRadius: 999, paddingVertical: 13, alignItems: 'center' },
+  modalSaveBtnDisabled: { opacity: 0.65 },
   modalSaveText: { color: colors.primaryFg, fontWeight: '900' },
   empty: { padding: 18, alignItems: 'center', backgroundColor: colors.background, borderRadius: 14, borderWidth: 1, borderColor: colors.border },
   emptyText: { color: colors.textMuted },
