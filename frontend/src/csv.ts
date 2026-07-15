@@ -1,7 +1,5 @@
 import { Platform } from 'react-native';
-import { getToken } from './api';
-
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+import { getApiBase, getToken } from './api';
 
 /**
  * Download a binary file (e.g. xlsx) from a backend path with Bearer auth.
@@ -9,7 +7,7 @@ const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
  */
 export async function downloadBinary(path: string, suggestedFilename: string, mimeType: string) {
   const token = await getToken();
-  const url = `${BASE}/api${path}`;
+  const url = `${getApiBase()}/api${path}`;
   const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!res.ok) throw new Error(`Download failed (${res.status})`);
   const ab = await res.arrayBuffer();
@@ -55,7 +53,7 @@ export async function downloadBinary(path: string, suggestedFilename: string, mi
  */
 export async function downloadCsv(path: string, suggestedFilename: string) {
   const token = await getToken();
-  const url = `${BASE}/api${path}`;
+  const url = `${getApiBase()}/api${path}`;
   const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!res.ok) throw new Error(`Download failed (${res.status})`);
   const text = await res.text();

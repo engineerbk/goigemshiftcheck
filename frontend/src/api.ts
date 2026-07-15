@@ -1,6 +1,21 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || '').replace(/\/+$/, '');
+function normalizeBaseUrl(value?: string) {
+  const raw = (value || '').replace(/\/+$/, '');
+  if (
+    typeof window !== 'undefined' &&
+    window.location?.hostname &&
+    !['localhost', '127.0.0.1'].includes(window.location.hostname) &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(raw)
+  ) {
+    return '';
+  }
+  return raw;
+}
+
+export function getApiBase() {
+  return normalizeBaseUrl(process.env.EXPO_PUBLIC_BACKEND_URL);
+}
 
 export type User = {
   id: string;
@@ -25,7 +40,7 @@ export async function setToken(token: string | null) {
 async function request(path: string, opts: RequestInit = {}) {
   const token = await getToken();
   const method = opts.method || 'GET';
-  const url = `${BASE}/api${path}`;
+  const url = `${getApiBase()}/api${path}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string> | undefined),

@@ -47,7 +47,7 @@ cd frontend
 rm -rf node_modules package-lock.json
 corepack enable
 yarn install --frozen-lockfile
-EXPO_NO_DOTENV=1 EXPO_PUBLIC_BACKEND_URL=http://52.64.160.45/ npx expo export --platform web
+EXPO_NO_DOTENV=1 EXPO_PUBLIC_BACKEND_URL= npx expo export --platform web
 ```
 
 If the backend is hosted on another origin, set that public HTTPS origin before exporting:
