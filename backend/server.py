@@ -1481,10 +1481,7 @@ def task_is_visible_to_user(task: dict, user: dict) -> bool:
     if is_owner(user):
         return True
     if is_manager(user):
-        return (
-            task.get("store_location") == user.get("store_location", "") and
-            task.get("assigned_user_id") in (None, "", user["id"])
-        )
+        return task.get("store_location") == user.get("store_location", "")
     return task.get("assigned_user_id") == user["id"]
 
 
